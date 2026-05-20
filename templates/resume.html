@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {
+            font-family: 'Latin Modern Roman', 'Computer Modern Roman', 'Times New Roman', Georgia, serif;
+            font-size: 10pt;
+            line-height: 1.15;
+            color: #000;
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            text-align: center;
+            font-size: 16pt;
+            margin: 0 0 2px 0;
+            font-weight: bold;
+        }
+        p:nth-of-type(1) {
+            text-align: center;
+            margin: 0 0 6px 0;
+            font-size: 9.5pt;
+        }
+        a {
+            color: #000;
+            text-decoration: none;
+        }
+        h2 {
+            font-size: 11pt;
+            text-transform: uppercase;
+            border-bottom: 1px solid #000;
+            margin: 8px 0 4px 0;
+            padding-bottom: 1px;
+            font-weight: bold;
+        }
+        .item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-top: 4px;
+        }
+        .item-title, .item-date {
+            font-size: 10pt;
+        }
+        .item-subtitle {
+            font-size: 10pt;
+            margin-top: 1px;
+            margin-bottom: 2px;
+        }
+        ul {
+            margin: 2px 0 4px 0;
+            padding-left: 18px;
+        }
+        li {
+            margin-bottom: 0px;
+        }
+        hr {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    {{ content }}
+</body>
+</html>

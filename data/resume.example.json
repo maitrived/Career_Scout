@@ -1,0 +1,32 @@
+{
+  "name": "Your Name",
+  "title": "Your Title",
+  "contact": {
+    "email": "you@example.com",
+    "phone": "(555)-555-5555",
+    "location": "City, State",
+    "linkedin": "https://www.linkedin.com/in/yourprofile/",
+    "github": "https://github.com/yourusername",
+    "portfolio": "https://yourportfolio.com/"
+  },
+  "summary": "Brief professional summary (replace with your own).",
+  "education": [
+    {
+      "institution": "University Name",
+      "degree": "Degree, e.g., Master of Science in Information Technology",
+      "gpa": "X.XX/4.00",
+      "location": "City, Country",
+      "graduation_date": "Month Year"
+    }
+  ],
+  "skills": {
+    "languages": ["Python", "Java", "TypeScript"],
+    "frameworks": ["FastAPI", "Spring Boot", "React"],
+    "databases": ["PostgreSQL", "Supabase", "Firestore"],
+    "infrastructure": ["GCP", "Docker", "Firebase"],
+    "security": ["REST APIs", "OAuth2", "JWT"],
+    "ai_ml": ["Gemini", "NVIDIA NIM"]
+  },
+  "experience": [],
+  "projects": []
+}
