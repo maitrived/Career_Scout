@@ -5,7 +5,7 @@ A **Python + TypeScript** pipeline that scrapes job postings, scores them ag
 ## Quick Start
 ```bash
 # Clone the repo
-git clone <repo‑url>
+git clone https://github.com/ParvaChaudhari/Career_Scout.git
 cd Scout
 
 # Create a virtual environment (recommended)
