@@ -12,3 +12,4 @@ numpy
 openai
 tenacity
 playwright
+PyPDF2>=3.0.0

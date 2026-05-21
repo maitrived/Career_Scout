@@ -7,7 +7,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-async def generate_pdf(markdown_content: str, job_id: str) -> str:
+async def generate_pdf(markdown_content: str, job_id: str) -> tuple[str, int]:
     """Converts markdown to HTML, injects it into template, and calls TS CLI."""
     try:
         # Convert Markdown to HTML
@@ -57,8 +57,22 @@ async def generate_pdf(markdown_content: str, job_id: str) -> str:
             logger.error(f"Playwright PDF generation failed: {process.stderr}")
             raise RuntimeError(f"PDF generation failed: {process.stderr}")
             
-        logger.info(f"PDF generated successfully at {abs_output_path}")
-        return output_path
+        page_fill = 100
+        initial_fill = 100
+        for line in process.stdout.splitlines():
+            if "PAGE_FILL:" in line:
+                try:
+                    page_fill = int(line.split("PAGE_FILL:")[1].strip())
+                except ValueError:
+                    pass
+            elif "INITIAL_FILL:" in line:
+                try:
+                    initial_fill = int(line.split("INITIAL_FILL:")[1].strip())
+                except ValueError:
+                    pass
+            
+        logger.info(f"PDF generated successfully at {abs_output_path} (Page Fill: {page_fill}%, Initial: {initial_fill}%)")
+        return output_path, page_fill, initial_fill
         
     except Exception as ex:
         logger.error(f"PDF generation failed: {ex}")

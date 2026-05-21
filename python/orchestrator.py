@@ -310,6 +310,8 @@ async def package_pipeline(job_id: str) -> Dict[str, Any]:
         "success": False,
         "job_id": job_id,
         "pdf_path": None,
+        "page_fill": 0,
+        "initial_fill": 0,
         "error": None
     }
     
@@ -333,7 +335,7 @@ async def package_pipeline(job_id: str) -> Dict[str, Any]:
         resume_md = row['resume_md']
         logger.info(f"Generating PDF for job '{job_id}'...")
         
-        pdf_path = await generate_pdf(resume_md, job_id)
+        pdf_path, page_fill, initial_fill = await generate_pdf(resume_md, job_id)
         
         # Update ResumeVersion with pdf_path
         rv = ResumeVersion(
@@ -348,7 +350,17 @@ async def package_pipeline(job_id: str) -> Dict[str, Any]:
         
         metrics["success"] = True
         metrics["pdf_path"] = pdf_path
-        logger.info(f"[SUCCESS] PDF Generated: {pdf_path}")
+        metrics["page_fill"] = page_fill
+        metrics["initial_fill"] = initial_fill
+        
+        if page_fill < 88:
+            logger.warning(f"⚠️ PDF content underfilled: Only {page_fill}% of the A4 page is utilized. Consider expanding experience/summary.")
+        elif page_fill > 100:
+            logger.warning(f"⚠️ PDF content overflowed: Page fill is {page_fill}%. It may span to a second page.")
+        else:
+            logger.info(f"✓ PDF layout fill is optimal: {page_fill}% page fit.")
+            
+        logger.info(f"[SUCCESS] PDF Generated: {pdf_path} ({page_fill}% page fill)")
         return metrics
         
     except Exception as ex:
@@ -469,3 +481,63 @@ async def process_single_job(job_id: str) -> Dict[str, Any]:
         metrics["success"] = True # It succeeded in processing, just didn't advance
         
     return metrics
+
+async def validate_pipeline(job_id: str) -> Dict[str, Any]:
+    """
+    Validates a tailored resume PDF's page fill consistency.
+    Re-renders the PDF using the TS generator and reports page fill percentage.
+    """
+    from python.utils.pdf_bridge import generate_pdf
+    from PyPDF2 import PdfReader
+    
+    metrics = {
+        "success": False,
+        "job_id": job_id,
+        "pdf_path": None,
+        "page_fill": 0,
+        "initial_fill": 0,
+        "page_count": None,
+        "error": None
+    }
+    
+    try:
+        app = get_application_by_job(job_id)
+        if not app or not app.resume_version_id:
+            raise ValueError(f"No tailored application/resume version found for job ID {job_id}. Please run the tailor command first.")
+            
+        # Fetch the resume version directly
+        from python.db.client import get_connection
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT resume_md, cover_letter, pdf_path FROM resume_versions WHERE id = ?", (str(app.resume_version_id),))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            raise ValueError(f"ResumeVersion ID {app.resume_version_id} not found in database.")
+            
+        resume_md = row['resume_md']
+        logger.info(f"Re-rendering and validating PDF for job '{job_id}'...")
+        
+        # Re-render PDF and capture fill ratio
+        pdf_path, page_fill, initial_fill = await generate_pdf(resume_md, job_id)
+        
+        # Determine page count using PyPDF2
+        try:
+            pdf_reader = PdfReader(pdf_path)
+            page_count = len(pdf_reader.pages)
+        except Exception as e:
+            logger.error(f"Failed to read PDF page count: {e}")
+            page_count = None
+            
+        metrics["success"] = True
+        metrics["pdf_path"] = pdf_path
+        metrics["page_fill"] = page_fill
+        metrics["initial_fill"] = initial_fill
+        metrics["page_count"] = page_count
+        return metrics
+        
+    except Exception as ex:
+        metrics["error"] = str(ex)
+        logger.error(f"Validation failed: {ex}")
+        return metrics

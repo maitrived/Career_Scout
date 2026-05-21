@@ -139,7 +139,7 @@ class ResumeTailor:
         """
         prompt = f"""
 You are an expert technical resume tailor. Your objective is to tailor the candidate's base resume
-to align with the specified job posting.
+to align with the specified job posting while strictly adhering to visual page constraints.
 
 ---
 ### CANDIDATE BASE RESUME (JSON)
@@ -158,8 +158,12 @@ to align with the specified job posting.
    - Rephrase the bullet text slightly to mirror terminology used in the job description where it is truthful.
    - Emphasize **Orbit** for supply chain, logistics, microservices, and platform/infrastructure roles.
    - Emphasize **MindHive** for AI, ML, vector search (pgvector), RAG, and data pipeline roles.
-2. **Technical Summary**:
-   - Refine the Professional Summary to highlight technologies and achievements relevant to the target role.
+2. **Strict Layout Constraints (Must be followed exactly)**:
+   - **Professional Summary**: Maximum of 2 sentences.
+   - **Vybd Experience Bullets**: Pick and tailor exactly 6 most relevant bullets (discard the rest).
+   - **Evision Experience Bullets**: Pick and tailor exactly 6 most relevant bullets (discard the rest).
+   - **MindHive Project Bullets**: Tailor exactly 3 bullets.
+   - **Total Bullets**: Under no circumstances should the total number of bullets in the entire resume exceed 15.
 3. **No Fabrication**:
    - Do NOT invent any skills, experience, projects, tools, metrics, or education. Keep all credentials truthful to the base resume.
    - Keep dates, contacts, degree names, and location fields exactly unchanged.
@@ -204,7 +208,7 @@ to align with the specified job posting.
         
         # Contact header
         c = r['contact']
-        md.append(f"\n{c['phone']} | {c['email']} | [LinkedIn]({c['linkedin']}) | [GitHub]({c['github']}) | Portfolio")
+        md.append(f"\n{c['phone']} | {c['email']} | [LinkedIn]({c['linkedin']}) | [GitHub]({c['github']}) | [Portfolio]({c['portfolio']})")
         md.append("\n---")
         
         # Summary
@@ -214,7 +218,9 @@ to align with the specified job posting.
         
         # Professional Experience
         md.append("\n## PROFESSIONAL EXPERIENCE")
-        for exp in r['experience']:
+        for i, exp in enumerate(r['experience']):
+            if i > 0:
+                md.append('\n<div class="item-gap"></div>')
             md.append(f'\n<div class="item-header"><div class="item-title"><strong>{exp["role"]}</strong></div><div class="item-date"><strong>{exp["start_date"]} - {exp["end_date"]}</strong></div></div>\n<div class="item-subtitle"><strong>{exp["company"]}</strong></div>\n')
             for bullet in exp['bullets']:
                 md.append(f"- {bullet}")
@@ -223,7 +229,9 @@ to align with the specified job posting.
         
         # Education
         md.append("\n## EDUCATION")
-        for edu in r['education']:
+        for i, edu in enumerate(r['education']):
+            if i > 0:
+                md.append('\n<div class="item-gap"></div>')
             loc_str = f", {edu['location']}" if edu.get('location') else ""
             gpa_str = f"<br>GPA {edu['gpa']}" if edu.get('gpa') else ""
             md.append(f'\n<div class="item-header"><div class="item-title"><strong>{edu["degree"]}</strong><br>{edu["institution"]}{loc_str}</div><div class="item-date" style="text-align: right;"><strong>{edu["graduation_date"]}</strong>{gpa_str}</div></div>\n')
@@ -232,10 +240,17 @@ to align with the specified job posting.
         
         # Project Experience
         md.append("\n## PROJECT EXPERIENCE")
-        for proj in r['projects']:
+        for i, proj in enumerate(r['projects']):
+            if i > 0:
+                md.append('\n<div class="item-gap"></div>')
             proj_title = proj['name']
             role_title = proj.get('role', 'Open Source')
-            md.append(f'\n<div class="item-header"><div class="item-title"><strong>{proj_title} | {role_title}</strong></div><div class="item-date"><strong>{proj["start_date"]}</strong></div></div>\n')
+            proj_link = proj.get('link', '')
+            if proj_link:
+                link_str = f' | <a href="{proj_link}">Link</a>'
+            else:
+                link_str = ''
+            md.append(f'\n<div class="item-header"><div class="item-title"><strong>{proj_title} | {role_title}{link_str}</strong></div><div class="item-date"><strong>{proj["start_date"]}</strong></div></div>\n')
             for bullet in proj['bullets']:
                 md.append(f"- {bullet}")
                 

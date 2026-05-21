@@ -276,6 +276,14 @@ async def autofill_job_by_url(page: Page, job: Job, resume_json: dict, pdf_path:
         await upload_file_by_selector_or_label(page, [], ["Resume", "CV"], pdf_path)
         await fill_by_selector_or_label(page, [], ["Cover Letter"], cover_letter)
 
+    # Question Handler for extra/custom questions
+    try:
+        from python.utils.question_handler import QuestionHandler
+        qh = QuestionHandler()
+        await qh.handle_extra_questions(page, job)
+    except Exception as ex:
+        logger.error(f"Error executing QuestionHandler: {ex}")
+
 async def run_multi_tab_autofill(job_ids: List[str]):
     """
     Launches headful browser and opens each job ID in a separate tab, fills standard fields,

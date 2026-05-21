@@ -16,9 +16,9 @@ app.post('/generate-pdf', async (req, res) => {
     }
     
     console.log(`Generating PDF -> ${output_path}`);
-    await generatePDF(html, output_path);
+    const fillRatio = await generatePDF(html, output_path);
     
-    res.json({ success: true, path: output_path });
+    res.json({ success: true, path: output_path, page_fill: fillRatio });
   } catch (error: any) {
     console.error('Error generating PDF:', error);
     res.status(500).json({ error: error.message });

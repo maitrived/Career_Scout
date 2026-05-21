@@ -54,3 +54,13 @@ This document contains all the commands you can run using the `scout.bat` CLI.
 
 **Command:** `.\scout.bat apply --job <id>`
 **Description:** Autofills the application form for a specific job ID, regardless of its status.
+
+## 8. Custom Q&A Bank Management
+**Command:** `.\scout.bat qa --list`
+**Description:** Lists all standard and open-ended/STAR answers currently stored in the local banks.
+
+**Command:** `.\scout.bat qa --add`
+**Description:** Starts an interactive shell utility to add new static fields/demographics to the QA bank.
+
+**Command:** `.\scout.bat qa --edit <key>`
+**Description:** Edits the answer or keywords for a specific entry in either the QA bank or STAR bank.

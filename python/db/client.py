@@ -430,6 +430,41 @@ def get_ready_applications() -> list[dict[str, Any]]:
     conn.close()
     return [dict(row) for row in rows]
 
+def get_jobs_needing_tailor() -> list[dict]:
+    """Returns all scored jobs (>= 3.5) that don't yet have a tailored resume version."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT j.id, j.company, j.title, s.overall_score
+    FROM jobs j
+    JOIN scores s ON j.id = s.job_id
+    LEFT JOIN applications a ON j.id = a.job_id
+    LEFT JOIN resume_versions rv ON a.resume_version_id = rv.id
+    WHERE s.overall_score >= 3.5
+      AND (a.id IS NULL OR rv.resume_md IS NULL)
+    ORDER BY s.overall_score DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+def get_jobs_needing_package() -> list[dict]:
+    """Returns all jobs with a tailored resume but no PDF yet."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT j.id, j.company, j.title, s.overall_score
+    FROM jobs j
+    JOIN scores s ON j.id = s.job_id
+    JOIN applications a ON j.id = a.job_id
+    JOIN resume_versions rv ON a.resume_version_id = rv.id
+    WHERE (rv.pdf_path IS NULL OR rv.pdf_path = '')
+    ORDER BY s.overall_score DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
 def get_pipeline_status() -> dict[str, int]:
     """Generates dashboard metrics for visual rich print rendering."""
     conn = get_connection()
