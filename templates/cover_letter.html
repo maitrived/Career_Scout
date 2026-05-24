@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <style>
+        :root {
+            --font-size: 11pt;
+            --line-height: 1.45;
+            --para-gap: 12px;
+            --margin-top: 6px;
+        }
+
+        body {
+            font-family: 'Latin Modern Roman', 'Computer Modern Roman', 'Times New Roman', Georgia, serif;
+            font-size: var(--font-size);
+            line-height: var(--line-height);
+            color: #000;
+            margin: 0;
+            /* Increase left/right printable margins for cover letters */
+            padding: 0 18mm;
+        }
+
+        /* ── Header ─────────────────────────────────────── */
+        #cl-name {
+            text-align: center;
+            font-size: 18pt;
+            font-weight: bold;
+            margin: 0 0 4px 0;
+            line-height: 1.15;
+        }
+
+        /* Single-line contact row: phone, email, and links (pipe-separated, single baseline) */
+        #cl-contact {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px; /* match resume template spacing */
+            font-size: 10.5pt;
+            margin: 0 0 12px 0;
+            line-height: 1.1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #cl-contact .contact-item,
+        #cl-contact a,
+        #cl-contact .sep {
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        #cl-contact .sep {
+            color: #000;
+            margin: 0 4px;
+        }
+
+        #cl-contact a {
+            color: #000;
+            text-decoration: none;
+        }
+
+        /* separator between header and body */
+        #cl-divider {
+            border: none;
+            border-top: 1px solid #000;
+            margin: 0 0 16px 0;
+        }
+
+        /* ── Date & Salutation ──────────────────────────── */
+        #cl-date {
+            /* Add vertical breathing room above and below the date */
+            margin: 12px 0 12px 0;
+            font-size: var(--font-size);
+        }
+
+        #cl-salutation {
+            margin: 0 0 var(--para-gap) 0;
+            font-size: var(--font-size);
+            font-weight: bold;
+        }
+
+        /* ── Body paragraphs ────────────────────────────── */
+        #cl-body p {
+            margin: 0 0 var(--para-gap) 0;
+            font-size: var(--font-size);
+            text-align: justify;
+            line-height: 1.6; /* increase paragraph line spacing for readability */
+        }
+
+        /* ── Closing ────────────────────────────────────── */
+        #cl-closing {
+            /* Add more space above the closing line */
+            margin: 18px 0 0 0;
+            font-size: var(--font-size);
+        }
+
+        /* Remove extra gap between closing and signature */
+        #cl-signature {
+            margin: 0 0 0 0;
+            font-size: var(--font-size);
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Header -->
+    <div id="cl-name">Parva Jignesh Chaudhari</div>
+    <div id="cl-contact">
+        <span class="contact-item">(602)-565-7517</span>
+        <span class="sep">|</span>
+        <span class="contact-item">parvachaudhari@gmail.com</span>
+        <span class="sep">|</span>
+        <a class="contact-item" href="https://www.linkedin.com/in/parvachaudhari/">LinkedIn</a>
+        <span class="sep">|</span>
+        <a class="contact-item" href="https://github.com/ParvaChaudhari">GitHub</a>
+        <span class="sep">|</span>
+        <a class="contact-item" href="https://parvachaudhari.vercel.app/">Portfolio</a>
+    </div>
+
+    <hr id="cl-divider">
+
+    <!-- Date (injected dynamically) -->
+    <div id="cl-date">{{ date }}</div>
+
+    <!-- Salutation -->
+    <div id="cl-salutation">Dear Hiring Team,</div>
+
+    <!-- Body — three paragraphs injected as plain text wrapped in <p> tags -->
+    <div id="cl-body">
+        {{ body }}
+    </div>
+
+    <!-- Closing -->
+    <div id="cl-closing">Best regards,</div>
+    <div id="cl-signature">Parva Chaudhari</div>
+</body>
+
+</html>

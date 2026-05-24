@@ -303,13 +303,15 @@ async def package_pipeline(job_id: str) -> Dict[str, Any]:
     """
     Orchestrates the packaging stage. Reads tailored resume markdown from the DB,
     converts it to a PDF using the TS Microservice, and saves the file path to the DB.
+    Also generates a cover letter PDF from the stored cover letter text.
     """
-    from python.utils.pdf_bridge import generate_pdf
+    from python.utils.pdf_bridge import generate_pdf, generate_cover_letter_pdf
     
     metrics = {
         "success": False,
         "job_id": job_id,
         "pdf_path": None,
+        "cover_letter_pdf_path": None,
         "page_fill": 0,
         "initial_fill": 0,
         "error": None
@@ -333,23 +335,38 @@ async def package_pipeline(job_id: str) -> Dict[str, Any]:
             raise ValueError(f"ResumeVersion ID {app.resume_version_id} not found in database.")
             
         resume_md = row['resume_md']
-        logger.info(f"Generating PDF for job '{job_id}'...")
+        cover_letter_text = row['cover_letter']
+        logger.info(f"Generating PDF package for job '{job_id}'...")
         
+        # ── 1. Resume PDF ────────────────────────────────────────────────────
         pdf_path, page_fill, initial_fill = await generate_pdf(resume_md, job_id)
         
-        # Update ResumeVersion with pdf_path
+        # ── 2. Cover Letter PDF ──────────────────────────────────────────────
+        cover_letter_pdf_path = None
+        if cover_letter_text and cover_letter_text.strip():
+            try:
+                cover_letter_pdf_path = await generate_cover_letter_pdf(cover_letter_text, job_id)
+                logger.info(f"Cover letter PDF generated: {cover_letter_pdf_path}")
+            except Exception as cl_ex:
+                logger.warning(f"Cover letter PDF generation failed (non-fatal): {cl_ex}")
+        else:
+            logger.warning("No cover letter text found in DB — skipping cover letter PDF.")
+        
+        # ── 3. Persist pdf_path back to ResumeVersion ────────────────────────
         rv = ResumeVersion(
             id=app.resume_version_id,
             job_id=row['job_id'],
             resume_md=row['resume_md'],
             cover_letter=row['cover_letter'],
             pdf_path=pdf_path,
+            cover_letter_pdf_path=cover_letter_pdf_path,
             created_at=row['created_at']
         )
         save_resume_version(rv)
         
         metrics["success"] = True
         metrics["pdf_path"] = pdf_path
+        metrics["cover_letter_pdf_path"] = cover_letter_pdf_path
         metrics["page_fill"] = page_fill
         metrics["initial_fill"] = initial_fill
         
@@ -360,13 +377,16 @@ async def package_pipeline(job_id: str) -> Dict[str, Any]:
         else:
             logger.info(f"✓ PDF layout fill is optimal: {page_fill}% page fit.")
             
-        logger.info(f"[SUCCESS] PDF Generated: {pdf_path} ({page_fill}% page fill)")
+        logger.info(f"[SUCCESS] PDF Package Generated: {pdf_path} ({page_fill}% page fill)")
+        if cover_letter_pdf_path:
+            logger.info(f"[SUCCESS] Cover Letter PDF: {cover_letter_pdf_path}")
         return metrics
         
     except Exception as ex:
         metrics["error"] = str(ex)
         logger.error(f"Packaging failed: {ex}")
         return metrics
+
 
 async def master_pipeline(company_slug: Optional[str] = None) -> Dict[str, Any]:
     """

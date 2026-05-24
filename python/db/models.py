@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID
 from pydantic import BaseModel, Field
 
+
 class Job(BaseModel):
     id: UUID | None = None
     source: str
@@ -17,6 +18,7 @@ class Job(BaseModel):
 
     class Config:
         from_attributes = True
+
 
 class Score(BaseModel):
     id: UUID | None = None
@@ -34,16 +36,19 @@ class Score(BaseModel):
     class Config:
         from_attributes = True
 
+
 class ResumeVersion(BaseModel):
     id: UUID | None = None
     job_id: UUID
     resume_md: str
     cover_letter: str
     pdf_path: str | None = None
+    cover_letter_pdf_path: str | None = None
     created_at: datetime | None = None
 
     class Config:
         from_attributes = True
+
 
 class Application(BaseModel):
     id: UUID | None = None
