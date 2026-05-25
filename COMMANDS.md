@@ -36,6 +36,18 @@ This document contains all the commands you can run using the `scout.bat` CLI.
 **Command:** `.\scout.bat package --job <id>`
 **Description:** Manually converts the tailored resume for a specific job into a final PDF in the `output/` folder.
 
+**Command:** `.\scout.bat validate --job <id>`
+**Description:** Re-renders a tailored resume PDF to verify its page-fill consistency and page count. It reports the PDF path, page fill percentage (initial and final after scaling), and the actual page count. This helps detect if the content is underfilled, overfilled, or heavily squished, providing warnings and suggestions for improvement.
+
+**Command:** `.\scout.bat validate`
+**Description:** Lists all jobs that have a tailored resume and prints each Job ID and its `page_fill` percentage as measured by the renderer (no side-effects or template edits).
+
+**Command:** `.\scout.bat validate --job <id> --increaseline <float>`
+**Description:** Performs a single per-render attempt to increase the CSS `--line-height` by the given amount for the specified job and reports the resulting `page_fill`. This is a per-render override only and does not modify `templates/resume.html`.
+
+**Command:** `.\scout.bat validate --job <id> --decreaseline <float>`
+**Description:** Performs a single per-render attempt to decrease the CSS `--line-height` by the given amount for the specified job and reports the resulting `page_fill`. This is a per-render override only and does not modify `templates/resume.html`.
+
 ## 5. Dashboard & Review
 **Command:** `.\scout.bat status`
 **Description:** Prints a visual dashboard showing exactly how many jobs are scraped, scored, advanced, and applied.

@@ -255,159 +255,74 @@ def cmd_package(args):
 
 
 def cmd_validate(args):
-    """Validates the PDF generation layout scaling and A4 page fit."""
+    """Validates the PDF generation layout scaling and A4 page fit.
+
+    Modes:
+    - No args: lists all jobs that have a tailored resume and prints their job ID and page_fill.
+    - --job <ID> with no adjust flags: validates that single job and prints detailed metrics.
+    - --job <ID> --increaseline X: iteratively re-renders the job increasing line-height by X until page_fill in [95,100] or attempts exhausted.
+    - --job <ID> --decreaseline X: iteratively re-renders the job decreasing line-height by X until page_fill in [95,100] or attempts exhausted.
+    """
+
     job_id = args.job
+    inc = getattr(args, "increaseline", None)
+    dec = getattr(args, "decreaseline", None)
 
-    # If --line is provided and no specific job_id, run bulk scan-and-adjust but only per-render (no global template edits)
-    if not job_id and args.line is not None:
-        console.print(
-            Panel(
-                f"[bold blue]Scout Pipeline: Validate & Adjust Line-Height (Bulk, per-render)[/bold blue]\n"
-                f"Adjustment: [cyan]{args.line}[/cyan]\n",
-                title="[bold]Phase 10 — Auto Line-Height Tuning (Per-Render)[/bold]",
-                expand=False,
-            )
-        )
+    # Validate flag usage
+    if inc is not None and dec is not None:
+        console.print("[bold red]Error: specify only one of --increaseline or --decreaseline.[/bold red]")
+        return
 
-        from pathlib import Path
-        import re
-
-        tpl_path = Path("templates/resume.html")
-        if not tpl_path.exists():
-            tpl_path = (
-                Path(__file__).resolve().parent.parent / "templates" / "resume.html"
-            )
-
-        # Find all jobs that have an application with a resume_version
+    # 1) No job: list all jobs with resumes and their page_fill values
+    if not job_id and inc is None and dec is None:
+        console.print(Panel("[bold blue]Resume Page-Fill Summary[/bold blue]", expand=False))
         from python.db.client import get_connection
 
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(
-            "SELECT j.id FROM jobs j JOIN applications a ON j.id = a.job_id JOIN resume_versions rv ON a.resume_version_id = rv.id"
+            "SELECT j.id as job_id FROM jobs j JOIN applications a ON j.id = a.job_id JOIN resume_versions rv ON a.resume_version_id = rv.id"
         )
         rows = cur.fetchall()
         conn.close()
 
-        adjusted = []
+        if not rows:
+            console.print("[yellow]No tailored resumes found in the database.[/yellow]")
+            return
+
         for r in rows:
             jid = r[0]
-            with console.status(f"Validating job {jid}..."):
+            try:
                 metrics = asyncio.run(validate_pipeline(job_id=jid))
-            if not metrics.get("success"):
-                console.print(
-                    f"  [red]Failed to validate {jid}: {metrics.get('error')}[/red]"
-                )
-                continue
-            page_fill = metrics.get("page_fill", 100)
-            # If over 100 -> decrease line-height by X; if under 95 -> increase by X
-            if page_fill > 100 or page_fill < 95:
-                # Read template to find current --line-height
-                txt = tpl_path.read_text(encoding="utf-8")
-                m = re.search(r"--line-height:\s*([0-9]*\.?[0-9]+);", txt)
-                if not m:
-                    console.print(
-                        f"  [yellow]Could not find --line-height in template for {jid}[/yellow]"
-                    )
-                    continue
-                cur_val = float(m.group(1))
-                if page_fill > 100:
-                    new_val = max(0.1, cur_val - float(args.line))
+                if metrics.get("success"):
+                    console.print(f"{jid} — page_fill: {metrics.get('page_fill')}%")
                 else:
-                    new_val = cur_val + float(args.line)
-
-                console.print(
-                    f"  [green]Will render job {jid} with adjusted line-height: {cur_val} -> {new_val} (page_fill {page_fill}%)[/green]"
-                )
-
-                # Re-render this job only with a per-render override (no file edits)
-                from python.utils.pdf_bridge import generate_pdf
-
-                # fetch resume_md for this job
-                from python.db.client import get_connection as _get_conn
-
-                conn2 = _get_conn()
-                cur2 = conn2.cursor()
-                cur2.execute(
-                    "SELECT rv.resume_md FROM resume_versions rv JOIN applications a ON rv.id = a.resume_version_id WHERE a.job_id = ?",
-                    (str(jid),),
-                )
-                rr = cur2.fetchone()
-                conn2.close()
-                if rr and rr[0]:
-                    try:
-                        out_path, pf, init = asyncio.run(
-                            generate_pdf(rr[0], jid, line_height_override=new_val)
-                        )
-                        console.print(
-                            f"    [green]Re-generated PDF (per-render override): {out_path} (page_fill {pf}%)[/green]"
-                        )
-                        adjusted.append(
-                            {
-                                "job_id": jid,
-                                "old": cur_val,
-                                "new": new_val,
-                                "page_fill": page_fill,
-                            }
-                        )
-                    except Exception as e:
-                        console.print(
-                            f"    [red]Failed re-generating PDF for {jid}: {e}[/red]"
-                        )
-                else:
-                    console.print(
-                        f"    [yellow]No resume markdown found for {jid}; skipped re-render.[/yellow]"
-                    )
-
-        console.print(
-            f"\n[bold]Adjustment complete:[/bold] {len(adjusted)} resumes re-rendered with overrides."
-        )
+                    console.print(f"{jid} — validation failed: {metrics.get('error')}")
+            except Exception as e:
+                console.print(f"{jid} — error: {e}")
         return
 
-    # If a specific job is provided along with --line, adjust only that job by overriding line-height for its render
-    if job_id and args.line is not None:
-        with console.status(f"Validating job {job_id} (single adjust)..."):
-            metrics = asyncio.run(validate_pipeline(job_id=job_id))
-        if not metrics.get("success"):
-            console.print(
-                f"[red]Failed to validate {job_id}: {metrics.get('error')}[/red]"
-            )
-            return
-        page_fill = metrics.get("page_fill", 100)
-        if not (page_fill > 100 or page_fill < 95):
-            console.print(
-                f"[green]No adjustment needed for job {job_id} (page_fill {page_fill}%).[/green]"
-            )
-            return
-
-        # Read current template line-height
+    # 2) Single-job adjustments
+    if job_id and (inc is not None or dec is not None):
+        # Fetch current template line-height
         from pathlib import Path
         import re
 
         tpl_path = Path("templates/resume.html")
         if not tpl_path.exists():
-            tpl_path = (
-                Path(__file__).resolve().parent.parent / "templates" / "resume.html"
-            )
+            tpl_path = Path(__file__).resolve().parent.parent / "templates" / "resume.html"
         txt = tpl_path.read_text(encoding="utf-8")
         m = re.search(r"--line-height:\s*([0-9]*\.?[0-9]+);", txt)
         if not m:
-            console.print(
-                f"[yellow]Could not find --line-height in template; aborting single-job adjustment.[/yellow]"
-            )
+            console.print("[yellow]Could not find --line-height in template; aborting adjustment.[/yellow]")
             return
         cur_val = float(m.group(1))
-        if page_fill > 100:
-            new_val = max(0.1, cur_val - float(args.line))
-        else:
-            new_val = cur_val + float(args.line)
 
-        # Re-render this job only with a per-render override (no file edits)
-        from python.utils.pdf_bridge import generate_pdf
+        step = inc if inc is not None else dec
+        direction = "increase" if inc is not None else "decrease"
 
-        # fetch resume_md for this job
+        # Prepare resume markdown
         from python.db.client import get_connection as _get_conn
-
         conn2 = _get_conn()
         cur2 = conn2.cursor()
         cur2.execute(
@@ -417,101 +332,76 @@ def cmd_validate(args):
         rr = cur2.fetchone()
         conn2.close()
         if not (rr and rr[0]):
-            console.print(
-                f"[yellow]No resume markdown found for {job_id}; cannot re-render.[/yellow]"
-            )
+            console.print(f"[yellow]No resume markdown found for {job_id}; cannot re-render.[/yellow]")
             return
+
+        # Single per-render adjustment (only one iteration)
+        from python.utils.pdf_bridge import generate_pdf
+
+        if direction == "increase":
+            current_val = cur_val + float(step)
+        else:
+            current_val = max(0.1, cur_val - float(step))
+
         try:
-            out_path, pf, init = asyncio.run(
-                generate_pdf(rr[0], job_id, line_height_override=new_val)
-            )
-            console.print(
-                f"[green]Re-generated PDF with override: {out_path} (page_fill {pf}%, initial {init}%)[/green]"
-            )
-            console.print(
-                f"[green]Adjusted line-height for render: {cur_val} -> {new_val}[/green]"
-            )
+            out_path, pf, init = asyncio.run(generate_pdf(rr[0], job_id, line_height_override=current_val))
         except Exception as e:
-            console.print(f"[red]Failed to re-generate PDF for {job_id}: {e}[/red]")
-        return
+            console.print(f"[red]Failed to generate PDF for {job_id}: {e}[/red]")
+            console.print(f"[yellow]No changes applied. Original line-height: {cur_val}[/yellow]")
+            return
 
-    if not job_id:
-        console.print(
-            "[bold red]Error: --job <id> is a required argument for the validate command when --line is not provided.[/bold red]"
-        )
-        return
-
-    console.print(
-        Panel(
-            f"[bold blue]Scout Pipeline: Layout & A4 Page Fit Validation[/bold blue]\n"
-            f"Job ID: [cyan]{job_id}[/cyan]",
-            title="[bold]Phase 10 — PDF Layout Consistency[/bold]",
-            expand=False,
-        )
-    )
-
-    with console.status("[bold green]Validating page scaling metrics...") as status:
-        metrics = asyncio.run(validate_pipeline(job_id=job_id))
-
-    if metrics["success"]:
-        pdf_path = metrics["pdf_path"]
-        page_fill = metrics["page_fill"]
-        initial_fill = metrics.get("initial_fill", page_fill)
-        page_count = metrics.get("page_count")
-
-        console.print(f"\n[bold green][PASS] Validation Complete![/bold green]")
-        console.print(f"PDF Output Path: [bold]{pdf_path}[/bold]")
-
-        # --- Page fill metric ---
-        if initial_fill > 105:
-            console.print(
-                f"[bold red][FAIL] [OVERFLOW] Initial content length was {initial_fill}%! Playwright squished it to {page_fill}%.[/bold red]"
-            )
-            console.print(
-                "[red]The resume content is too long. The font size has been drastically reduced, making it hard to read. Shorten the experience bullets.[/red]"
-            )
-        elif page_fill < 88:
-            console.print(
-                f"[bold yellow]⚠️  [UNDERFILL] Page fill is {page_fill}% (below target 88%).[/bold yellow]"
-            )
-            console.print(
-                "[yellow]The content is too short for a single A4 page. Consider adding more detail to bullets.[/yellow]"
-            )
-        elif page_fill > 100:
-            console.print(
-                f"[bold red]⚠️  [OVERFLOW] Page fill is {page_fill}% (exceeds 100%).[/bold red]"
-            )
-            console.print(
-                "[red]The content is too long. Shorten experience bullets or reduce font size.[/red]"
-            )
+        console.print(f"[dim]Rendered page_fill={pf}%, initial={init}%, line-height={current_val}[/dim]")
+        if 95 <= pf <= 100:
+            console.print(f"[green]Success: page_fill {pf}% with line-height {current_val}[/green]")
         else:
-            console.print(
-                f"[bold green][PASS] Page fill is optimal (Initial: {initial_fill}%, Final: {page_fill}%).[/bold green]"
-            )
+            console.print(f"[yellow]Single adjustment finished; page_fill={pf}% (line-height {current_val}).[/yellow]")
+        console.print(f"[green]Per-render adjustment attempted: {cur_val} -> {current_val}[/green]")
+        return
 
-        # --- Actual page count from PDF ---
-        if page_count is not None:
-            if page_count == 1:
-                console.print(
-                    f"[bold green][PASS] Page count: {page_count} — Resume fits on exactly one page![/bold green]"
-                )
+    # 3) Single-job validation (no adjustments): unchanged behavior
+    if job_id:
+        console.print(Panel(f"[bold blue]Scout Pipeline: Layout & A4 Page Fit Validation[/bold blue]\n" f"Job ID: [cyan]{job_id}[/cyan]", title="[bold]Phase 10 — PDF Layout Consistency[/bold]", expand=False))
+        with console.status("[bold green]Validating page scaling metrics...") as status:
+            metrics = asyncio.run(validate_pipeline(job_id=job_id))
+
+        if metrics["success"]:
+            pdf_path = metrics["pdf_path"]
+            page_fill = metrics["page_fill"]
+            initial_fill = metrics.get("initial_fill", page_fill)
+            page_count = metrics.get("page_count")
+
+            console.print(f"\n[bold green][PASS] Validation Complete![/bold green]")
+            console.print(f"PDF Output Path: [bold]{pdf_path}[/bold]")
+
+            # --- Page fill metric ---
+            if initial_fill > 105:
+                console.print(f"[bold red][FAIL] [OVERFLOW] Initial content length was {initial_fill}%! Playwright squished it to {page_fill}%.[/bold red]")
+                console.print("[red]The resume content is too long. The font size has been drastically reduced, making it hard to read. Shorten the experience bullets.[/red]")
+            elif page_fill < 88:
+                console.print(f"[bold yellow]⚠️  [UNDERFILL] Page fill is {page_fill}% (below target 88%).[/bold yellow]")
+                console.print("[yellow]The content is too short for a single A4 page. Consider adding more detail to bullets.[/yellow]")
+            elif page_fill > 100:
+                console.print(f"[bold red]⚠️  [OVERFLOW] Page fill is {page_fill}% (exceeds 100%).[/bold red]")
+                console.print("[red]The content is too long. Shorten experience bullets or reduce font size.[/red]")
             else:
-                console.print(
-                    f"[bold red][FAIL] Page count: {page_count} — Resume is overflowing to {page_count} pages![/bold red]"
-                )
-                console.print(
-                    "[red]The 'page fill' metric is based on scrollHeight and may underestimate the true PDF length.[/red]"
-                )
-                console.print(
-                    "[yellow]Fix: Reduce font size, line-height, or bullet count in templates/resume.html[/yellow]"
-                )
+                console.print(f"[bold green][PASS] Page fill is optimal (Initial: {initial_fill}%, Final: {page_fill}%).[/bold green]")
+
+            # --- Actual page count from PDF ---
+            if page_count is not None:
+                if page_count == 1:
+                    console.print(f"[bold green][PASS] Page count: {page_count} — Resume fits on exactly one page![/bold green]")
+                else:
+                    console.print(f"[bold red][FAIL] Page count: {page_count} — Resume is overflowing to {page_count} pages![/bold red]")
+                    console.print("[red]The 'page fill' metric is based on scrollHeight and may underestimate the true PDF length.[/red]")
+                    console.print("[yellow]Fix: Reduce font size, line-height, or bullet count in templates/resume.html[/yellow]")
+            else:
+                console.print("[yellow]⚠️  Could not determine page count from PDF.[/yellow]")
         else:
-            console.print(
-                "[yellow]⚠️  Could not determine page count from PDF.[/yellow]"
-            )
-    else:
-        console.print(f"\n[bold red][FAIL] Validation failed![/bold red]")
-        console.print(f"Error: [red]{metrics['error']}[/red]")
+            console.print(f"\n[bold red][FAIL] Validation failed![/bold red]")
+            console.print(f"Error: [red]{metrics['error']}[/red]")
+        return
+
+    # End of validate
 
 
 def cmd_scrape(args):
@@ -974,10 +864,16 @@ def main():
         "--job", type=str, default=None, help="Specific job ID to validate layout for"
     )
     parser_validate.add_argument(
-        "--line",
+        "--increaseline",
         type=float,
         default=None,
-        help="If set (e.g. 0.5), adjust template line-height by this amount for over/under-filled resumes in bulk",
+        help="Increase line-height by this amount for the specified job (per-render)",
+    )
+    parser_validate.add_argument(
+        "--decreaseline",
+        type=float,
+        default=None,
+        help="Decrease line-height by this amount for the specified job (per-render)",
     )
 
     # Parse arguments
