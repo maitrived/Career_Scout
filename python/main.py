@@ -50,7 +50,7 @@ def cmd_score(args):
             f"Job ID: [cyan]{job_id or 'All Unscored'}[/cyan]\n"
             f"Within Days: [cyan]{within_days or 'All'}[/cyan]\n"
             f"Dry Run: [cyan]{dry_run}[/cyan]",
-            title="[bold]Phase 3 — Scoring[/bold]",
+            title="[bold]Scoring[/bold]",
             expand=False,
         )
     )
@@ -106,7 +106,7 @@ def cmd_tailor(args):
             Panel(
                 f"[bold blue]Scout Pipeline: Tailoring Stage[/bold blue]\n"
                 f"Job ID: [cyan]{job_id}[/cyan]",
-                title="[bold]Phase 4 — Tailoring[/bold]",
+                title="[bold]Tailoring[/bold]",
                 expand=False,
             )
         )
@@ -137,7 +137,7 @@ def cmd_tailor(args):
         Panel(
             f"[bold blue]Scout Pipeline: Bulk Tailoring Stage[/bold blue]\n"
             f"Jobs to tailor: [cyan]{len(jobs)}[/cyan]",
-            title="[bold]Phase 4 — Tailoring (Bulk)[/bold]",
+            title="[bold]Tailoring (Bulk)[/bold]",
             expand=False,
         )
     )
@@ -193,7 +193,7 @@ def cmd_package(args):
             Panel(
                 f"[bold blue]Scout Pipeline: Packaging Stage[/bold blue]\n"
                 f"Job ID: [cyan]{job_id}[/cyan]",
-                title="[bold]Phase 5 — PDF Generation[/bold]",
+                title="[bold]PDF Generation[/bold]",
                 expand=False,
             )
         )
@@ -224,7 +224,7 @@ def cmd_package(args):
         Panel(
             f"[bold blue]Scout Pipeline: Bulk Packaging Stage[/bold blue]\n"
             f"Jobs to package: [cyan]{len(jobs)}[/cyan]",
-            title="[bold]Phase 5 — PDF Generation (Bulk)[/bold]",
+            title="[bold]PDF Generation (Bulk)[/bold]",
             expand=False,
         )
     )
@@ -270,12 +270,16 @@ def cmd_validate(args):
 
     # Validate flag usage
     if inc is not None and dec is not None:
-        console.print("[bold red]Error: specify only one of --increaseline or --decreaseline.[/bold red]")
+        console.print(
+            "[bold red]Error: specify only one of --increaseline or --decreaseline.[/bold red]"
+        )
         return
 
     # 1) No job: list all jobs with resumes and their page_fill values
     if not job_id and inc is None and dec is None:
-        console.print(Panel("[bold blue]Resume Page-Fill Summary[/bold blue]", expand=False))
+        console.print(
+            Panel("[bold blue]Resume Page-Fill Summary[/bold blue]", expand=False)
+        )
         from python.db.client import get_connection
 
         conn = get_connection()
@@ -310,11 +314,15 @@ def cmd_validate(args):
 
         tpl_path = Path("templates/resume.html")
         if not tpl_path.exists():
-            tpl_path = Path(__file__).resolve().parent.parent / "templates" / "resume.html"
+            tpl_path = (
+                Path(__file__).resolve().parent.parent / "templates" / "resume.html"
+            )
         txt = tpl_path.read_text(encoding="utf-8")
         m = re.search(r"--line-height:\s*([0-9]*\.?[0-9]+);", txt)
         if not m:
-            console.print("[yellow]Could not find --line-height in template; aborting adjustment.[/yellow]")
+            console.print(
+                "[yellow]Could not find --line-height in template; aborting adjustment.[/yellow]"
+            )
             return
         cur_val = float(m.group(1))
 
@@ -323,6 +331,7 @@ def cmd_validate(args):
 
         # Prepare resume markdown
         from python.db.client import get_connection as _get_conn
+
         conn2 = _get_conn()
         cur2 = conn2.cursor()
         cur2.execute(
@@ -332,7 +341,9 @@ def cmd_validate(args):
         rr = cur2.fetchone()
         conn2.close()
         if not (rr and rr[0]):
-            console.print(f"[yellow]No resume markdown found for {job_id}; cannot re-render.[/yellow]")
+            console.print(
+                f"[yellow]No resume markdown found for {job_id}; cannot re-render.[/yellow]"
+            )
             return
 
         # Single per-render adjustment (only one iteration)
@@ -344,23 +355,42 @@ def cmd_validate(args):
             current_val = max(0.1, cur_val - float(step))
 
         try:
-            out_path, pf, init = asyncio.run(generate_pdf(rr[0], job_id, line_height_override=current_val))
+            out_path, pf, init = asyncio.run(
+                generate_pdf(rr[0], job_id, line_height_override=current_val)
+            )
         except Exception as e:
             console.print(f"[red]Failed to generate PDF for {job_id}: {e}[/red]")
-            console.print(f"[yellow]No changes applied. Original line-height: {cur_val}[/yellow]")
+            console.print(
+                f"[yellow]No changes applied. Original line-height: {cur_val}[/yellow]"
+            )
             return
 
-        console.print(f"[dim]Rendered page_fill={pf}%, initial={init}%, line-height={current_val}[/dim]")
+        console.print(
+            f"[dim]Rendered page_fill={pf}%, initial={init}%, line-height={current_val}[/dim]"
+        )
         if 95 <= pf <= 100:
-            console.print(f"[green]Success: page_fill {pf}% with line-height {current_val}[/green]")
+            console.print(
+                f"[green]Success: page_fill {pf}% with line-height {current_val}[/green]"
+            )
         else:
-            console.print(f"[yellow]Single adjustment finished; page_fill={pf}% (line-height {current_val}).[/yellow]")
-        console.print(f"[green]Per-render adjustment attempted: {cur_val} -> {current_val}[/green]")
+            console.print(
+                f"[yellow]Single adjustment finished; page_fill={pf}% (line-height {current_val}).[/yellow]"
+            )
+        console.print(
+            f"[green]Per-render adjustment attempted: {cur_val} -> {current_val}[/green]"
+        )
         return
 
     # 3) Single-job validation (no adjustments): unchanged behavior
     if job_id:
-        console.print(Panel(f"[bold blue]Scout Pipeline: Layout & A4 Page Fit Validation[/bold blue]\n" f"Job ID: [cyan]{job_id}[/cyan]", title="[bold]Phase 10 — PDF Layout Consistency[/bold]", expand=False))
+        console.print(
+            Panel(
+                f"[bold blue]Scout Pipeline: Layout & A4 Page Fit Validation[/bold blue]\n"
+                f"Job ID: [cyan]{job_id}[/cyan]",
+                title="[bold]PDF Layout Consistency[/bold]",
+                expand=False,
+            )
+        )
         with console.status("[bold green]Validating page scaling metrics...") as status:
             metrics = asyncio.run(validate_pipeline(job_id=job_id))
 
@@ -375,27 +405,51 @@ def cmd_validate(args):
 
             # --- Page fill metric ---
             if initial_fill > 105:
-                console.print(f"[bold red][FAIL] [OVERFLOW] Initial content length was {initial_fill}%! Playwright squished it to {page_fill}%.[/bold red]")
-                console.print("[red]The resume content is too long. The font size has been drastically reduced, making it hard to read. Shorten the experience bullets.[/red]")
+                console.print(
+                    f"[bold red][FAIL] [OVERFLOW] Initial content length was {initial_fill}%! Playwright squished it to {page_fill}%.[/bold red]"
+                )
+                console.print(
+                    "[red]The resume content is too long. The font size has been drastically reduced, making it hard to read. Shorten the experience bullets.[/red]"
+                )
             elif page_fill < 88:
-                console.print(f"[bold yellow]⚠️  [UNDERFILL] Page fill is {page_fill}% (below target 88%).[/bold yellow]")
-                console.print("[yellow]The content is too short for a single A4 page. Consider adding more detail to bullets.[/yellow]")
+                console.print(
+                    f"[bold yellow]⚠️  [UNDERFILL] Page fill is {page_fill}% (below target 88%).[/bold yellow]"
+                )
+                console.print(
+                    "[yellow]The content is too short for a single A4 page. Consider adding more detail to bullets.[/yellow]"
+                )
             elif page_fill > 100:
-                console.print(f"[bold red]⚠️  [OVERFLOW] Page fill is {page_fill}% (exceeds 100%).[/bold red]")
-                console.print("[red]The content is too long. Shorten experience bullets or reduce font size.[/red]")
+                console.print(
+                    f"[bold red]⚠️  [OVERFLOW] Page fill is {page_fill}% (exceeds 100%).[/bold red]"
+                )
+                console.print(
+                    "[red]The content is too long. Shorten experience bullets or reduce font size.[/red]"
+                )
             else:
-                console.print(f"[bold green][PASS] Page fill is optimal (Initial: {initial_fill}%, Final: {page_fill}%).[/bold green]")
+                console.print(
+                    f"[bold green][PASS] Page fill is optimal (Initial: {initial_fill}%, Final: {page_fill}%).[/bold green]"
+                )
 
             # --- Actual page count from PDF ---
             if page_count is not None:
                 if page_count == 1:
-                    console.print(f"[bold green][PASS] Page count: {page_count} — Resume fits on exactly one page![/bold green]")
+                    console.print(
+                        f"[bold green][PASS] Page count: {page_count} — Resume fits on exactly one page![/bold green]"
+                    )
                 else:
-                    console.print(f"[bold red][FAIL] Page count: {page_count} — Resume is overflowing to {page_count} pages![/bold red]")
-                    console.print("[red]The 'page fill' metric is based on scrollHeight and may underestimate the true PDF length.[/red]")
-                    console.print("[yellow]Fix: Reduce font size, line-height, or bullet count in templates/resume.html[/yellow]")
+                    console.print(
+                        f"[bold red][FAIL] Page count: {page_count} — Resume is overflowing to {page_count} pages![/bold red]"
+                    )
+                    console.print(
+                        "[red]The 'page fill' metric is based on scrollHeight and may underestimate the true PDF length.[/red]"
+                    )
+                    console.print(
+                        "[yellow]Fix: Reduce font size, line-height, or bullet count in templates/resume.html[/yellow]"
+                    )
             else:
-                console.print("[yellow]⚠️  Could not determine page count from PDF.[/yellow]")
+                console.print(
+                    "[yellow]⚠️  Could not determine page count from PDF.[/yellow]"
+                )
         else:
             console.print(f"\n[bold red][FAIL] Validation failed![/bold red]")
             console.print(f"Error: [red]{metrics['error']}[/red]")
@@ -408,20 +462,24 @@ def cmd_scrape(args):
     """Executes the job scraper stage."""
     company = args.company
     query = args.query
+    source = args.source
+    run_all = args.all
 
     console.print(
         Panel(
             f"[bold blue]Scout Pipeline: Scraping Stage[/bold blue]\n"
             f"Company: [cyan]{company or 'All TARGET_COMPANIES'}[/cyan]\n"
-            f"Search Query: [cyan]{query or 'None'}[/cyan]",
-            title="[bold]Phase 2 — Scraping[/bold]",
+            f"Search Query: [cyan]{query or 'None'}[/cyan]\n"
+            f"Source: [cyan]{source or 'All'}[/cyan]\n"
+            f"Run All: [cyan]{run_all}[/cyan]",
+            title="[bold]Scraping[/bold]",
             expand=False,
         )
     )
 
     # Run the async orchestrator
     with console.status("[bold green]Running scraper drivers...") as status:
-        metrics = asyncio.run(scrape_pipeline(company_slug=company, search_query=query))
+        metrics = asyncio.run(scrape_pipeline(company_slug=company, search_query=query, source=source, run_all=run_all))
 
     console.print("\n[bold green]Scraping Stage Complete![/bold green]")
     console.print(f"Companies Attempted: [bold]{metrics['companies_attempted']}[/bold]")
@@ -446,6 +504,14 @@ def cmd_scrape(args):
                 f"  - [red]... and {len(metrics['errors']) - 5} more errors.[/red]"
             )
 
+    if metrics.get("zero_job_companies"):
+        import os
+        os.makedirs("data", exist_ok=True)
+        with open("data/failed_companies.log", "w", encoding="utf-8") as f:
+            for c in sorted(list(set(metrics["zero_job_companies"]))):
+                f.write(f"{c}\n")
+        console.print(f"\n[bold yellow]Logged {len(set(metrics['zero_job_companies']))} companies with 0 jobs found to data/failed_companies.log[/bold yellow]")
+
 
 def cmd_pipeline(args):
     """Executes the full end-to-end pipeline."""
@@ -455,7 +521,7 @@ def cmd_pipeline(args):
         Panel(
             f"[bold blue]Scout Master Pipeline[/bold blue]\n"
             f"Target: [cyan]{company or 'All TARGET_COMPANIES'}[/cyan]",
-            title="[bold]Phase 6 — Orchestrator[/bold]",
+            title="[bold]Orchestrator Pipeline[/bold]",
             expand=False,
         )
     )
@@ -482,7 +548,7 @@ def cmd_process(args):
         Panel(
             f"[bold blue]Scout Single-Job Pipeline[/bold blue]\n"
             f"Job ID: [cyan]{job_id}[/cyan]",
-            title="[bold]Phase 6 — Single Job Process[/bold]",
+            title="[bold]Single Job Process[/bold]",
             expand=False,
         )
     )
@@ -584,7 +650,7 @@ def cmd_apply(args):
             Panel(
                 f"[bold blue]Scout Auto-Filler: Single Job[/bold blue]\n"
                 f"Job ID: [cyan]{job_id}[/cyan]",
-                title="[bold]Phase 8 — Auto-Filler[/bold]",
+                title="[bold]Auto-Filler[/bold]",
                 expand=False,
             )
         )
@@ -603,7 +669,7 @@ def cmd_apply(args):
             Panel(
                 f"[bold blue]Scout Auto-Filler: Multi-Tab[/bold blue]\n"
                 f"Ready Applications to Fill: [cyan]{len(job_ids)}[/cyan]",
-                title="[bold]Phase 8 — Auto-Filler[/bold]",
+                title="[bold]Auto-Filler[/bold]",
                 expand=False,
             )
         )
@@ -745,6 +811,17 @@ def main():
         type=str,
         default=None,
         help="LinkedIn jobs search query (triggers Apify actor)",
+    )
+    parser_scrape.add_argument(
+        "--source",
+        type=str,
+        default=None,
+        help="Specific scraper source to run (e.g. 'yc', 'wellfound', 'direct')",
+    )
+    parser_scrape.add_argument(
+        "--all",
+        action="store_true",
+        help="Run all target companies AND aggregator sources (yc, wellfound)",
     )
 
     # 2. Status subcommand

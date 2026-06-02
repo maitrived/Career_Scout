@@ -31,13 +31,31 @@ async def run_scraper_for_company(company_info: dict) -> List[Job]:
         scraper = LeverScraper()
     elif source == "ashby":
         scraper = AshbyScraper()
+    elif source == "workday":
+        from python.scraper.workday import WorkdayScraper
+        scraper = WorkdayScraper()
+    elif source == "smartrecruiters":
+        from python.scraper.smartrecruiters import SmartRecruitersScraper
+        scraper = SmartRecruitersScraper()
+    elif source == "jobvite":
+        from python.scraper.jobvite import JobviteScraper
+        scraper = JobviteScraper()
+    elif source == "direct":
+        from python.scraper.direct import DirectScraper
+        scraper = DirectScraper()
+    elif source == "yc":
+        from python.scraper.apify_actor import YcScraper
+        scraper = YcScraper()
+    elif source == "wellfound":
+        from python.scraper.apify_actor import WellfoundScraper
+        scraper = WellfoundScraper()
     else:
         logger.warning(f"Unknown scraper source '{source}' for company '{name}'. Skipping.")
         return []
         
     return await scraper.fetch_jobs(slug)
 
-async def scrape_pipeline(company_slug: Optional[str] = None, search_query: Optional[str] = None) -> Dict[str, Any]:
+async def scrape_pipeline(company_slug: Optional[str] = None, search_query: Optional[str] = None, source: Optional[str] = None, run_all: bool = False) -> Dict[str, Any]:
     """
     Orchestrates the scraping stage of the pipeline.
     
@@ -57,7 +75,8 @@ async def scrape_pipeline(company_slug: Optional[str] = None, search_query: Opti
         "companies_successful": 0,
         "jobs_scraped": 0,
         "jobs_saved": 0,
-        "errors": []
+        "errors": [],
+        "zero_job_companies": []
     }
     
     from python.utils.job_filter import passes_job_filter
@@ -95,7 +114,11 @@ async def scrape_pipeline(company_slug: Optional[str] = None, search_query: Opti
             company_configs = [
                 {"name": company_slug.title(), "slug": company_slug, "source": "greenhouse"},
                 {"name": company_slug.title(), "slug": company_slug, "source": "lever"},
-                {"name": company_slug.title(), "slug": company_slug, "source": "ashby"}
+                {"name": company_slug.title(), "slug": company_slug, "source": "ashby"},
+                {"name": company_slug.title(), "slug": company_slug, "source": "workday"},
+                {"name": company_slug.title(), "slug": company_slug, "source": "smartrecruiters"},
+                {"name": company_slug.title(), "slug": company_slug, "source": "jobvite"},
+                {"name": company_slug.title(), "slug": company_slug, "source": "direct"}
             ]
             
         metrics["companies_attempted"] = len(company_configs)
@@ -124,11 +147,72 @@ async def scrape_pipeline(company_slug: Optional[str] = None, search_query: Opti
         metrics["jobs_saved"] = saved_count
         return metrics
 
-    # Scenario 3: No company or search query specified; run all TARGET_COMPANIES scrapers
+    # Scenario 3: A specific source was requested without a company/query (e.g., --source yc)
+    if source and not company_slug and not search_query:
+        logger.info(f"Scraping all companies for source: {source}...")
+        
+        if source in ["yc", "wellfound"]:
+            # These are aggregator scrapers, not per-company
+            config = {"name": source.title(), "slug": source, "source": source}
+            metrics["companies_attempted"] = 1
+            jobs = await run_scraper_for_company(config)
+            
+            if jobs:
+                metrics["companies_successful"] = 1
+                total_scraped = len(jobs)
+                for job in jobs:
+                    if passes_job_filter(job):
+                        try:
+                            save_job(job)
+                            saved_count += 1
+                        except Exception as ex:
+                            logger.error(f"Error saving {source} job: {ex}")
+                            metrics["errors"].append(str(ex))
+            metrics["jobs_scraped"] = total_scraped
+            metrics["jobs_saved"] = saved_count
+            return metrics
+            
+        # For standard sources, filter TARGET_COMPANIES by source
+        targets = [c for c in TARGET_COMPANIES if c.get("source") == source]
+        metrics["companies_attempted"] = len(targets)
+        for config in targets:
+            try:
+                jobs = await run_scraper_for_company(config)
+                if jobs:
+                    metrics["companies_successful"] += 1
+                    total_scraped += len(jobs)
+                    for job in jobs:
+                        if not passes_job_filter(job):
+                            continue
+                        try:
+                            save_job(job)
+                            saved_count += 1
+                        except Exception as ex:
+                            logger.error(f"Error saving job: {ex}")
+                            metrics["errors"].append(str(ex))
+                else:
+                    metrics["zero_job_companies"].append(config.get('name'))
+            except Exception as ex:
+                logger.error(f"Failed executing scraper for {config.get('name')}: {ex}")
+                metrics["errors"].append(str(ex))
+                
+        metrics["jobs_scraped"] = total_scraped
+        metrics["jobs_saved"] = saved_count
+        return metrics
+
+    # Scenario 4: No company or search query specified; run all TARGET_COMPANIES scrapers
     logger.info("Scraping all configured target companies...")
     metrics["companies_attempted"] = len(TARGET_COMPANIES)
     
-    for config in TARGET_COMPANIES:
+    # If --all is passed, we also want to explicitly run the YC and Wellfound aggregators
+    targets_to_run = list(TARGET_COMPANIES)
+    if run_all:
+        logger.info("Run All enabled: appending YC and Wellfound to target list.")
+        targets_to_run.append({"name": "Y Combinator", "slug": "yc", "source": "yc"})
+        targets_to_run.append({"name": "Wellfound", "slug": "wellfound", "source": "wellfound"})
+        metrics["companies_attempted"] += 2
+        
+    for config in targets_to_run:
         try:
             jobs = await run_scraper_for_company(config)
             if jobs:
@@ -144,6 +228,8 @@ async def scrape_pipeline(company_slug: Optional[str] = None, search_query: Opti
                     except Exception as ex:
                         logger.error(f"Error saving job: {ex}")
                         metrics["errors"].append(str(ex))
+            else:
+                metrics["zero_job_companies"].append(config.get('name'))
         except Exception as ex:
             logger.error(f"Failed executing scraper for {config.get('name')}: {ex}")
             metrics["errors"].append(str(ex))

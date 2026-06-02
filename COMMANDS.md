@@ -11,10 +11,16 @@ This document contains all the commands you can run using the `scout.bat` CLI.
 
 ## 2. Scraping
 **Command:** `.\scout.bat scrape`
-**Description:** Scrapes jobs from all predefined companies in your `config.py` targets.
+**Description:** Scrapes jobs from all predefined companies in your `config.py` targets (excludes Apify aggregator sources by default).
+
+**Command:** `.\scout.bat scrape --all`
+**Description:** Scrapes jobs from all predefined target companies AND runs the Apify aggregator sources (YC and Wellfound) in one command.
 
 **Command:** `.\scout.bat scrape --company <slug>`
 **Description:** Scrapes jobs for a specific company (e.g. `retool`, `anthropic`).
+
+**Command:** `.\scout.bat scrape --source <source>`
+**Description:** Scrapes jobs for a specific source integration (e.g. `workday`, `yc`, `wellfound`, `direct`).
 
 **Command:** `.\scout.bat scrape --query "Python Backend Engineer"`
 **Description:** Uses the Apify integration to scrape LinkedIn jobs based on a specific search query.

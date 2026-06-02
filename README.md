@@ -21,7 +21,7 @@ python -m playwright install
 ## Workflow
 | Phase | Command | What it does |
 |------|---------|--------------|
-| 1️⃣  | `scout.bat scrape` | Pull jobs from Greenhouse, Lever, Ashby, LinkedIn, etc. |
+| 1️⃣  | `scout.bat scrape` | Pull jobs from Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Jobvite, Playwright Direct, and Apify (YC/Wellfound/LinkedIn). |
 | 2️⃣  | `scout.bat score`   | Score each job (only keep `overall_score ≥ 3.5`). |
 | 3️⃣  | `scout.bat tailor --job <id>` | Generate a tailored résumé & cover‑letter (stored in the DB). |
 | 4️⃣  | `scout.bat package --job <id>` | Render a PDF via Playwright (see `ts/`). |
@@ -32,7 +32,7 @@ Below are the primary CLI commands available via `scout.bat`. See `COMMANDS.md` 
 
 - `scout.bat pipeline --company <slug>` — Run end-to-end pipeline for a company (Scrape → Score → Tailor → Package).
 - `scout.bat process --job <id>` — Run pipeline for a single job (Score → Tailor → Package).
-- `scout.bat scrape [--company <slug>] [--query "<text>"]` — Scrape jobs globally or for a company/query.
+- `scout.bat scrape [--company <slug>] [--query "<text>"] [--source <source>] [--all]` — Scrape jobs globally, for a company, a query, a specific source (like `yc`), or all sources combined.
 - `scout.bat score [--job <id>] [--dry-run]` — Score jobs; `--dry-run` prints which jobs would be scored.
 - `scout.bat tailor --job <id>` — Generate tailored resume and cover letter for a job and store in DB.
 - `scout.bat package --job <id>` — Render tailored resume to PDF in `output/`.
