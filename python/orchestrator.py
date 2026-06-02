@@ -438,6 +438,9 @@ async def package_pipeline(job_id: str) -> Dict[str, Any]:
         else:
             logger.warning("No cover letter text found in DB — skipping cover letter PDF.")
         
+        # Determine page_fill value to store based on conditions
+        stored_page_fill = page_fill if 95 <= page_fill <= 100 else initial_fill
+
         # ── 3. Persist pdf_path back to ResumeVersion ────────────────────────
         rv = ResumeVersion(
             id=app.resume_version_id,
@@ -446,6 +449,7 @@ async def package_pipeline(job_id: str) -> Dict[str, Any]:
             cover_letter=row['cover_letter'],
             pdf_path=pdf_path,
             cover_letter_pdf_path=cover_letter_pdf_path,
+            page_fill=stored_page_fill,
             created_at=row['created_at']
         )
         save_resume_version(rv)

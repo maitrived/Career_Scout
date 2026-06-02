@@ -404,6 +404,87 @@ async def autofill_ashby(
             logger.info("Successfully uploaded cover letter PDF to Ashby form.")
 
 
+async def autofill_generic(
+    page: Page,
+    resume_json: dict,
+    pdf_path: str,
+    cover_letter: str,
+    cover_letter_pdf_path: str | None = None,
+):
+    """Generic fallback form filler for unrecognized ATS domains."""
+    logger.warning(f"Running generic fallback form filler on {page.url}...")
+    contact = resume_json.get("contact", {})
+    await fill_by_selector_or_label(
+        page, [], ["First Name", "Name"], resume_json.get("name", "")
+    )
+    await fill_by_selector_or_label(
+        page, [], ["Last Name"], resume_json.get("name", "").split(" ")[-1]
+    )
+    await fill_by_selector_or_label(page, [], ["Email"], contact.get("email", ""))
+    await fill_by_selector_or_label(page, [], ["Phone"], contact.get("phone", ""))
+    await fill_by_selector_or_label(page, [], ["LinkedIn"], contact.get("linkedin", ""))
+    await fill_by_selector_or_label(page, [], ["GitHub"], contact.get("github", ""))
+    await upload_file_by_selector_or_label(page, [], ["Resume", "CV"], pdf_path)
+    # Try paste first, then attempt file upload for cover letter if available
+    pasted = await fill_by_selector_or_label(page, [], ["Cover Letter"], cover_letter)
+    if not pasted and cover_letter_pdf_path:
+        await upload_file_by_selector_or_label(
+            page, [], ["Cover Letter", "cover_letter"], cover_letter_pdf_path
+        )
+
+
+async def autofill_yc(
+    page: Page,
+    resume_json: dict,
+    pdf_path: str,
+    cover_letter: str,
+    cover_letter_pdf_path: str | None = None,
+):
+    """Handles Y Combinator job postings which require clicking an 'Apply' button first."""
+    logger.info("Attempting to click YC Apply button...")
+    try:
+        # Match 'Apply', 'Apply Now', 'Apply to role' (case insensitive using playwright's text matching)
+        apply_btn = page.locator("button, a").filter(has_text="Apply to role ›")
+
+        count = await apply_btn.count()
+        clicked = False
+        for i in range(count):
+            btn = apply_btn.nth(i)
+            if await btn.is_visible():
+                # For YC links, it sometimes opens a new tab. In our setup, we can just click and wait.
+                # If it opens a new tab, Playwright's `page` object won't switch automatically.
+                # But typically 'Apply' either opens a modal or does same-tab navigation.
+                await btn.click()
+                clicked = True
+                break
+
+        if clicked:
+            logger.info("Clicked YC Apply button. Waiting for form...")
+            await page.wait_for_timeout(3000)
+    except Exception as ex:
+        logger.warning(f"Could not click YC Apply button: {ex}")
+
+    # Now we check the URL, if it redirected to a known ATS, use that specific autofill.
+    current_url = page.url.lower()
+    if "greenhouse.io" in current_url:
+        await autofill_greenhouse(
+            page, resume_json, pdf_path, cover_letter, cover_letter_pdf_path
+        )
+    elif "lever.co" in current_url:
+        await autofill_lever(
+            page, resume_json, pdf_path, cover_letter, cover_letter_pdf_path
+        )
+    elif "ashbyhq.com" in current_url:
+        await autofill_ashby(
+            page, resume_json, pdf_path, cover_letter, cover_letter_pdf_path
+        )
+    else:
+        # Still on YC or unknown ATS. Run generic fallback.
+        await autofill_generic(
+            page, resume_json, pdf_path, cover_letter, cover_letter_pdf_path
+        )
+
+
 async def autofill_job_by_url(
     page: Page,
     job: Job,
@@ -433,31 +514,15 @@ async def autofill_job_by_url(
         await autofill_ashby(
             page, resume_json, pdf_path, cover_letter, cover_letter_pdf_path
         )
+    elif "ycombinator.com" in url:
+        await autofill_yc(
+            page, resume_json, pdf_path, cover_letter, cover_letter_pdf_path
+        )
     else:
         # Generic fallback
-        logger.warning("Unrecognized domain. Applying fallback form filling...")
-        contact = resume_json.get("contact", {})
-        await fill_by_selector_or_label(
-            page, [], ["First Name", "Name"], resume_json.get("name", "")
+        await autofill_generic(
+            page, resume_json, pdf_path, cover_letter, cover_letter_pdf_path
         )
-        await fill_by_selector_or_label(
-            page, [], ["Last Name"], resume_json.get("name", "").split(" ")[-1]
-        )
-        await fill_by_selector_or_label(page, [], ["Email"], contact.get("email", ""))
-        await fill_by_selector_or_label(page, [], ["Phone"], contact.get("phone", ""))
-        await fill_by_selector_or_label(
-            page, [], ["LinkedIn"], contact.get("linkedin", "")
-        )
-        await fill_by_selector_or_label(page, [], ["GitHub"], contact.get("github", ""))
-        await upload_file_by_selector_or_label(page, [], ["Resume", "CV"], pdf_path)
-        # Try paste first, then attempt file upload for cover letter if available
-        pasted = await fill_by_selector_or_label(
-            page, [], ["Cover Letter"], cover_letter
-        )
-        if not pasted and cover_letter_pdf_path:
-            await upload_file_by_selector_or_label(
-                page, [], ["Cover Letter", "cover_letter"], cover_letter_pdf_path
-            )
 
     # Question Handler for extra/custom questions
     try:

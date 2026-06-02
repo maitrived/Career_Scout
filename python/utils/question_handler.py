@@ -84,6 +84,39 @@ class QuestionHandler:
     async def get_label_text(self, page: Page, element) -> str:
         """Retrieves cleaned label or descriptive text associated with an input element."""
         try:
+            type_attr = (await element.get_attribute("type") or "").lower()
+            if type_attr in ["radio", "checkbox"]:
+                # Try to get the group label (fieldset legend or nearby question)
+                group_text = await element.evaluate("""el => {
+                    const fieldset = el.closest('fieldset');
+                    if (fieldset) {
+                        const legend = fieldset.querySelector('legend');
+                        if (legend) return legend.innerText || '';
+                    }
+                    // Fallback to searching up the tree for a container with text ending in ? or :
+                    let curr = el.parentElement;
+                    for (let i=0; i<4; i++) { // search up to 4 levels up
+                        if (!curr) break;
+                        const prev = curr.previousElementSibling;
+                        if (prev && prev.innerText) {
+                            if (prev.innerText.includes('?') || prev.innerText.includes('*')) {
+                                return prev.innerText;
+                            }
+                        }
+                        // Also check for a parent div with a question-like label before the inputs
+                        const firstChild = curr.firstElementChild;
+                        if (firstChild && firstChild !== el && firstChild.tagName !== 'INPUT') {
+                             if (firstChild.innerText && (firstChild.innerText.includes('?') || firstChild.innerText.includes('*'))) {
+                                 return firstChild.innerText;
+                             }
+                        }
+                        curr = curr.parentElement;
+                    }
+                    return '';
+                }""")
+                if group_text.strip():
+                    return group_text.strip()
+            
             # 1. Look for <label for="id"> matching element id
             id_val = await element.get_attribute("id")
             if id_val:
@@ -284,11 +317,11 @@ RULES:
                 continue
                 
             tag_name = await field.evaluate("el => el.tagName.toLowerCase()")
-            val = (await field.input_value() if tag_name != "select" else await field.evaluate("el => el.value")) or ""
-            
-            if val.strip():
-                # Already filled by core/standard fill
-                continue
+            if type_attr not in ["radio", "checkbox"]:
+                val = (await field.input_value() if tag_name != "select" else await field.evaluate("el => el.value")) or ""
+                if val.strip():
+                    # Already filled by core/standard fill
+                    continue
                 
             unfilled_fields.append(field)
             

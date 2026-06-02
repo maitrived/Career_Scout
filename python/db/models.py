@@ -44,6 +44,7 @@ class ResumeVersion(BaseModel):
     cover_letter: str
     pdf_path: str | None = None
     cover_letter_pdf_path: str | None = None
+    page_fill: float | None = None
     created_at: datetime | None = None
 
     class Config:

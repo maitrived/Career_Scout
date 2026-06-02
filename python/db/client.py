@@ -95,6 +95,10 @@ def init_db():
         cursor.execute(
             "ALTER TABLE resume_versions ADD COLUMN cover_letter_pdf_path TEXT;"
         )
+    if "page_fill" not in rv_cols:
+        cursor.execute(
+            "ALTER TABLE resume_versions ADD COLUMN page_fill REAL;"
+        )
 
     # 4. Applications table
     cursor.execute("""
@@ -352,13 +356,14 @@ def save_resume_version(rv: ResumeVersion) -> ResumeVersion:
 
     cursor.execute(
         """
-    INSERT INTO resume_versions (id, job_id, resume_md, cover_letter, pdf_path, cover_letter_pdf_path, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO resume_versions (id, job_id, resume_md, cover_letter, pdf_path, cover_letter_pdf_path, page_fill, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
         resume_md=excluded.resume_md,
         cover_letter=excluded.cover_letter,
         pdf_path=excluded.pdf_path,
         cover_letter_pdf_path=excluded.cover_letter_pdf_path,
+        page_fill=excluded.page_fill,
         created_at=excluded.created_at
     """,
         (
@@ -368,6 +373,7 @@ def save_resume_version(rv: ResumeVersion) -> ResumeVersion:
             rv.cover_letter,
             rv.pdf_path,
             getattr(rv, "cover_letter_pdf_path", None),
+            getattr(rv, "page_fill", None),
             created_at_str,
         ),
     )

@@ -1,0 +1,71 @@
+{
+  
+  "authorized_to_work": {
+    "answer": "Yes",
+    "type": "dropdown",
+    "keywords": [
+      "authorized to work",
+      "legally authorized",
+      "legal right to work"
+    ]
+  },
+  "open_to_inperson": {
+    "answer": "Yes",
+    "type": "dropdown",
+    "keywords": [
+      "25%",
+      "in-person",
+      "office time",
+      "on-site"
+    ]
+  },
+  "start_date": {
+    "answer": "2 weeks after offer",
+    "type": "text",
+    "keywords": [
+      "earliest",
+      "start date",
+      "start working",
+      "available to start"
+    ]
+  },
+  "open_to_relocation": {
+    "answer": "Yes",
+    "type": "dropdown",
+    "keywords": [
+      "relocation",
+      "relocate",
+      "willing to relocate"
+    ]
+  },
+  "interviewed_before": {
+    "answer": "No",
+    "type": "dropdown",
+    "keywords": [
+      "interviewed before",
+      "applied before",
+      "previously interviewed",
+      "previously applied"
+    ]
+  },
+
+  "veteran_status": {
+    "answer": "I am not a protected veteran",
+    "type": "dropdown",
+    "keywords": [
+      "veteran",
+      "protected veteran",
+      "military service"
+    ]
+  },
+  "disability_status": {
+    "answer": "No, I do not have a disability",
+    "type": "dropdown",
+    "keywords": [
+      "disability",
+      "disabled",
+      "physical or mental impairment"
+    ]
+  }
+
+}

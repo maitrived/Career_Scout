@@ -62,6 +62,7 @@ class ProjectEntry(BaseModel):
     location: str
     start_date: str
     end_date: str
+    link: Optional[str] = ""
     bullets: List[str]
 
 class TailoredResume(BaseModel):

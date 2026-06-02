@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS resume_versions (
     resume_md TEXT NOT NULL,
     cover_letter TEXT NOT NULL,
     pdf_path TEXT,
+    page_fill REAL,
     created_at TEXT NOT NULL,          -- ISO 8601 string datetime
     FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
 );

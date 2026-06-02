@@ -1,0 +1,13 @@
+{
+  "why_company": {
+    "keywords": ["why anthropic", "why this company", "why us", "why do you want", "reason for applying", "interests you about"],
+    "template": "Generate a specific 2-sentence answer for why I wants to work at {company} based on their public mission/product space and the job description. Keep it humble, direct, and technical.",
+    "type": "gemini_generated"
+  },
+
+  "cover_letter": {
+    "keywords": ["additional information", "cover letter", "tell us more", "anything else", "briefly describe"],
+    "type": "gemini_generated",
+    "template": "Generate a 3-paragraph cover letter for {company} - {role}. Use my resume and the job description. Be specific, technical, no fluff."
+  }
+}

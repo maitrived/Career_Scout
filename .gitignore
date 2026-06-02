@@ -36,3 +36,6 @@ Thumbs.db
 # Personal resume files
 data/resume.json
 data/resume.md
+
+data/qa_bank.json
+data/star_bank.json
