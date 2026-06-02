@@ -51,6 +51,12 @@ Below are the primary CLI commands available via `scout.bat`. See `COMMANDS.md` 
 * A template (`data/resume.example.json` / `data/resume.example.md`) is provided so others can add their own data without exposing yours.
 * `.env` files with API keys are also ignored by default.
 
+## Personalization Notice
+
+- **Purpose:** This project and its scoring/tailoring logic are configured for me (Parva) (many inputs — projects, experience, Q&A — are intentionally hard-coded). It is provided as a personal tool and may not work "out of the box" for others.
+- **How to adapt:** Replace or edit your personal data in `data/resume.json`, `data/resume.md`, and the example templates in `templates/`. Update or remove any hard-coded entries in `python/tailor/`, `data/qa_bank.json`, and `scorer/` to reflect your own experience.
+- **Need help customizing?** Ask an AI agent (for example, open an issue or prompt your assistant with a request like "Help me adapt Scout to my resume: replace Parva's projects and experiences with mine and update scoring rules"). You can also fork the repo and search for occurrences of "Parva" or your own name to find places to edit.
+
 ## Generating a New Project
 ```bash
 scout.bat pipeline --company <slug>
