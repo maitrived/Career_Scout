@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
@@ -220,41 +221,35 @@ RULES:
         try:
             tag_name = await element.evaluate("el => el.tagName.toLowerCase()")
             type_attr = (await element.get_attribute("type") or "").lower()
-            
+
             if tag_name == "select":
-                # Handle dropdown selection
-                options_count = await element.locator("option").count()
-                best_val = None
-                
-                # Check for perfect match or fuzzy keyword match
-                for i in range(options_count):
-                    opt = element.locator("option").nth(i)
-                    opt_text = (await opt.inner_text()).strip()
-                    opt_val = await opt.get_attribute("value")
-                    
-                    if opt_val:
-                        if answer.lower() == opt_text.lower():
-                            best_val = opt_val
-                            break
-                        elif answer.lower() in opt_text.lower():
-                            best_val = opt_val
-                            # keep searching for an exact match, but hold this as fallback
-                
-                if best_val:
-                    await element.select_option(value=best_val)
+                # 1. Exact label match
+                try:
+                    await element.select_option(label=answer)
                     return True
-                else:
-                    try:
-                        await element.select_option(label=answer)
-                        return True
-                    except Exception:
-                        pass
-                
+                except Exception:
+                    pass
+                # 2. Exact value match
+                try:
+                    await element.select_option(value=answer)
+                    return True
+                except Exception:
+                    pass
+                # 3. Fuzzy: iterate options and pick partial match
+                try:
+                    options = await element.evaluate(
+                        "el => Array.from(el.options).map(o => ({value: o.value, text: o.text.trim()}))"
+                    )
+                    ans_lower = answer.lower()
+                    for opt in options:
+                        if ans_lower in opt["text"].lower() or ans_lower in opt["value"].lower():
+                            await element.select_option(value=opt["value"])
+                            return True
+                except Exception:
+                    pass
+
             elif tag_name == "input" and type_attr == "radio":
-                # Handle radio input: we should click it if its own text/value represents the answer
-                # E.g. find label or parent text near the radio input
                 radio_text = await element.evaluate("""el => {
-                    // Try to find direct label or text sibling
                     const parent = el.parentElement;
                     if (parent && parent.tagName.toLowerCase() === 'label') return parent.innerText || '';
                     const id = el.getAttribute('id');
@@ -264,28 +259,70 @@ RULES:
                     }
                     return el.value || '';
                 }""")
-                
                 if answer.lower() == radio_text.strip().lower() or answer.lower() in radio_text.strip().lower():
                     await element.click()
                     return True
-                    
+
             elif tag_name == "input" and type_attr == "checkbox":
-                # Handle checkbox
                 should_check = answer.lower() in ["yes", "true", "1", "checked", "agree", "y"]
                 is_checked = await element.is_checked()
                 if should_check != is_checked:
                     await element.click()
                 return True
-                
+
             else:
-                # Handle standard text input and textareas
+                # Standard text/textarea — fill then check for autocomplete suggestions
                 await element.fill(answer)
+                await asyncio.sleep(1.0)  # Give JS time to render the dropdown
+                # Try to click a matching autocomplete suggestion if one appeared
+                suggestion_selectors = [
+                    # Exact text match first (fastest)
+                    f'[role="option"]:has-text("{answer}")',
+                    # React Select v5/v6
+                    '[class*="select__option"]',
+                    '[class*="Select__option"]',
+                    '[class*="select__menu"] [class*="option"]',
+                    # Headless UI / Radix
+                    '[role="listbox"] [role="option"]',
+                    '[role="listbox"] li',
+                    # Generic
+                    'li[role="option"]',
+                    '.dropdown-item',
+                    '[class*="suggestion"]',
+                    '[class*="autocomplete"] li',
+                    '[class*="dropdown"] li',
+                    '[class*="menu-item"]',
+                    # Greenhouse/Lever specific
+                    '.select-dropdown li',
+                    '.option-list li',
+                ]
+                ans_lower = answer.lower()
+                for sel in suggestion_selectors:
+                    try:
+                        opts = page.locator(sel)
+                        count = await opts.count()
+                        if count == 0:
+                            continue
+                        for i in range(min(count, 20)):
+                            opt = opts.nth(i)
+                            if not await opt.is_visible():
+                                continue
+                            text = (await opt.inner_text()).strip().lower()
+                            if ans_lower in text or text in ans_lower:
+                                await opt.click()
+                                return True
+                        if count == 1 and await opts.first.is_visible():
+                            await opts.first.click()
+                            return True
+                    except Exception:
+                        continue
                 return True
-                
+
         except Exception as e:
             logger.error(f"Error filling element: {e}")
-            
+
         return False
+
 
     async def handle_extra_questions(self, page: Page, job: Job):
         """

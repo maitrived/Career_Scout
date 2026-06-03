@@ -275,35 +275,34 @@ def cmd_validate(args):
         )
         return
 
-    # 1) No job: list all jobs with resumes and their page_fill values
+    # 1) No job: list all jobs with resumes out of bounds
     if not job_id and inc is None and dec is None:
         console.print(
-            Panel("[bold blue]Resume Page-Fill Summary[/bold blue]", expand=False)
+            Panel("[bold blue]Resume Page-Fill Summary (Out of Bounds)[/bold blue]", expand=False)
         )
         from python.db.client import get_connection
 
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(
-            "SELECT j.id as job_id FROM jobs j JOIN applications a ON j.id = a.job_id JOIN resume_versions rv ON a.resume_version_id = rv.id"
+            "SELECT j.id, rv.page_fill FROM jobs j JOIN applications a ON j.id = a.job_id JOIN resume_versions rv ON a.resume_version_id = rv.id WHERE rv.page_fill < 95 OR rv.page_fill > 100"
         )
         rows = cur.fetchall()
         conn.close()
 
         if not rows:
-            console.print("[yellow]No tailored resumes found in the database.[/yellow]")
+            console.print("[green]All tailored resumes are perfectly fitted (95-100%) or no resumes found![/green]")
             return
 
         for r in rows:
-            jid = r[0]
-            try:
-                metrics = asyncio.run(validate_pipeline(job_id=jid))
-                if metrics.get("success"):
-                    console.print(f"{jid} — page_fill: {metrics.get('page_fill')}%")
-                else:
-                    console.print(f"{jid} — validation failed: {metrics.get('error')}")
-            except Exception as e:
-                console.print(f"{jid} — error: {e}")
+            jid = r["id"]
+            pf = r["page_fill"]
+            if pf is None:
+                continue
+            if pf > 100:
+                console.print(f"[red]{jid} — page_fill: {pf}% (OVERFLOW)[/red]")
+            else:
+                console.print(f"[yellow]{jid} — page_fill: {pf}% (UNDERFILL)[/yellow]")
         return
 
     # 2) Single-job adjustments
@@ -368,13 +367,25 @@ def cmd_validate(args):
         console.print(
             f"[dim]Rendered page_fill={pf}%, initial={init}%, line-height={current_val}[/dim]"
         )
+        
+        # Save to database
+        stored_pf = pf if 95 <= pf <= 100 else init
+        conn3 = _get_conn()
+        cur3 = conn3.cursor()
+        cur3.execute(
+            "UPDATE resume_versions SET page_fill = ? WHERE id = (SELECT resume_version_id FROM applications WHERE job_id = ?)",
+            (stored_pf, str(job_id))
+        )
+        conn3.commit()
+        conn3.close()
+        
         if 95 <= pf <= 100:
             console.print(
-                f"[green]Success: page_fill {pf}% with line-height {current_val}[/green]"
+                f"[green]Success: page_fill {pf}% with line-height {current_val} (Saved to DB: {stored_pf}%)[/green]"
             )
         else:
             console.print(
-                f"[yellow]Single adjustment finished; page_fill={pf}% (line-height {current_val}).[/yellow]"
+                f"[yellow]Single adjustment finished; page_fill={pf}% (line-height {current_val}). (Saved to DB: {stored_pf}%)[/yellow]"
             )
         console.print(
             f"[green]Per-render adjustment attempted: {cur_val} -> {current_val}[/green]"

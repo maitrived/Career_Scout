@@ -32,59 +32,199 @@ def load_resume_json() -> dict:
         return {}
 
 
+async def _smart_fill_element(page: Page, element, value: str) -> bool:
+    """
+    Fills a single element smartly:
+    - Native <select>: uses select_option() with fuzzy matching
+    - React Select / custom autocomplete: opens menu then clicks matching option
+    - Text/textarea: uses fill()
+    """
+    try:
+        tag = await element.evaluate("el => el.tagName.toLowerCase()")
+        el_type = (await element.get_attribute("type") or "").lower()
+
+        # --- React Select detection: check if input lives inside a [class*="select__control"] ---
+        is_react_select = await element.evaluate("""el => {
+            let curr = el.parentElement;
+            for (let i = 0; i < 5; i++) {
+                if (!curr) break;
+                if (curr.className && curr.className.includes('select__control')) return true;
+                if (curr.className && curr.className.includes('Select__control')) return true;
+                curr = curr.parentElement;
+            }
+            return false;
+        }""")
+        if is_react_select:
+            # Click to open menu, type to filter, then click the right option
+            try:
+                await element.click()
+                await asyncio.sleep(0.3)
+                await element.fill(value)
+                await asyncio.sleep(1.0)
+                # Find the option in the React Select menu
+                for sel in [
+                    f'[class*="select__option"]:has-text("{value}")',
+                    '[class*="select__option"]',
+                    f'[class*="Select__option"]:has-text("{value}")',
+                    '[class*="Select__option"]',
+                ]:
+                    try:
+                        opts = page.locator(sel)
+                        count = await opts.count()
+                        val_lower = value.lower()
+                        for i in range(min(count, 20)):
+                            opt = opts.nth(i)
+                            if not await opt.is_visible():
+                                continue
+                            text = (await opt.inner_text()).strip().lower()
+                            if val_lower in text or text in val_lower:
+                                await opt.click()
+                                return True
+                        if count == 1 and await opts.first.is_visible():
+                            await opts.first.click()
+                            return True
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        # --- Native <select> dropdown ---
+        if tag == "select":
+            # 1. Try exact label match
+            try:
+                await element.select_option(label=value)
+                return True
+            except Exception:
+                pass
+            # 2. Try exact value match
+            try:
+                await element.select_option(value=value)
+                return True
+            except Exception:
+                pass
+            # 3. Fuzzy match against all options
+            try:
+                options = await element.evaluate(
+                    "el => Array.from(el.options).map(o => ({value: o.value, text: o.text.trim()}))"
+                )
+                val_lower = value.lower()
+                for opt in options:
+                    if val_lower in opt["text"].lower() or val_lower in opt["value"].lower():
+                        await element.select_option(value=opt["value"])
+                        return True
+            except Exception:
+                pass
+            return False
+
+        # --- Skip non-fillable types ---
+        if el_type in ["file", "submit", "button", "hidden", "image", "checkbox", "radio"]:
+            return False
+
+        # --- Standard text / textarea: fill then check for autocomplete suggestions ---
+        await element.fill(value)
+        await asyncio.sleep(1.0)  # Give JS time to render the dropdown
+
+        # Check if a suggestion dropdown appeared (covers React Select, Selectize, Chosen, custom)
+        suggestion_selectors = [
+            # Exact text match first (fastest)
+            f'[role="option"]:has-text("{value}")',
+            # React Select v5/v6
+            '[class*="select__option"]',
+            '[class*="Select__option"]',
+            '[class*="select__menu"] [class*="option"]',
+            # Headless UI / Radix
+            '[role="listbox"] [role="option"]',
+            '[role="listbox"] li',
+            # Generic
+            'li[role="option"]',
+            '.dropdown-item',
+            'ul.suggestions li',
+            '[data-testid*="option"]',
+            '[class*="suggestion"]',
+            '[class*="autocomplete"] li',
+            '[class*="dropdown"] li',
+            '[class*="menu-item"]',
+            # Greenhouse/Lever specific
+            '.select-dropdown li',
+            '.option-list li',
+        ]
+        val_lower = value.lower()
+        for sel in suggestion_selectors:
+            try:
+                opts = page.locator(sel)
+                count = await opts.count()
+                if count == 0:
+                    continue
+                for i in range(min(count, 20)):
+                    opt = opts.nth(i)
+                    if not await opt.is_visible():
+                        continue
+                    text = (await opt.inner_text()).strip().lower()
+                    if val_lower in text or text in val_lower:
+                        await opt.click()
+                        return True
+                # If only one option visible, click it
+                if count == 1 and await opts.first.is_visible():
+                    await opts.first.click()
+                    return True
+            except Exception:
+                continue
+
+        return True  # fill() was called even if no autocomplete matched
+
+    except Exception:
+        pass
+    return False
+
+
 async def fill_by_selector_or_label(
     page: Page, selectors: List[str], label_texts: List[str], value: str
 ) -> bool:
     """
-    Attempts to fill an input field using selectors, falling back to label text matching.
+    Attempts to fill an input field, select option, or custom dropdown using selectors,
+    falling back to label text matching. Handles native <select>, autocomplete, and text inputs.
     """
-    # 1. Try selectors first
+    # ── Step 1: Try explicit selectors ────────────────────────────────────────
     for sel in selectors:
         try:
             loc = page.locator(sel)
-            if (
-                await loc.count() > 0
-                and await loc.first.is_visible()
-                and await loc.first.is_editable()
-            ):
-                await loc.first.fill(value)
-                return True
+            if await loc.count() > 0 and await loc.first.is_visible():
+                if await _smart_fill_element(page, loc.first, value):
+                    return True
         except Exception:
             pass
 
-    # 2. Try label text matching
+    # ── Step 2: Try label text matching ───────────────────────────────────────
     for label in label_texts:
         try:
-            # Match exact or near text labels
             label_loc = page.locator(f'label:has-text("{label}")')
             count = await label_loc.count()
             for i in range(count):
-                loc = label_loc.nth(i)
-                for_id = await loc.get_attribute("for")
+                lbl = label_loc.nth(i)
+                for_id = await lbl.get_attribute("for")
                 if for_id:
-                    input_loc = page.locator(f"#{for_id}")
-                    if await input_loc.is_visible() and await input_loc.is_editable():
-                        await input_loc.fill(value)
-                        return True
+                    target = page.locator(f"#{for_id}")
+                    if await target.count() > 0 and await target.is_visible():
+                        if await _smart_fill_element(page, target, value):
+                            return True
         except Exception:
             pass
 
-    # 3. Last resort: Match by name/id/placeholder matching keywords
+    # ── Step 3: Scan by name/id/placeholder attribute keywords ────────────────
     try:
-        inputs = page.locator("input, textarea")
+        inputs = page.locator("input, textarea, select")
         count = await inputs.count()
         for i in range(count):
             inp = inputs.nth(i)
             name = (await inp.get_attribute("name") or "").lower()
             placeholder = (await inp.get_attribute("placeholder") or "").lower()
             id_val = (await inp.get_attribute("id") or "").lower()
-
             for keyword in label_texts:
                 kw = keyword.lower()
                 if kw in name or kw in placeholder or kw in id_val:
-                    if await inp.is_visible() and await inp.is_editable():
-                        await inp.fill(value)
-                        return True
+                    if await inp.is_visible():
+                        if await _smart_fill_element(page, inp, value):
+                            return True
     except Exception:
         pass
 
