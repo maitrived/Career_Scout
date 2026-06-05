@@ -43,10 +43,12 @@ def cmd_score(args):
     job_id = args.job
     within_days = args.within_days
     dry_run = args.dry_run
+    company = getattr(args, "company", None)
 
     console.print(
         Panel(
             f"[bold blue]Scout Pipeline: Scoring Stage[/bold blue]\n"
+            f"Company: [cyan]{company or 'All Companies'}[/cyan]\n"
             f"Job ID: [cyan]{job_id or 'All Unscored'}[/cyan]\n"
             f"Within Days: [cyan]{within_days or 'All'}[/cyan]\n"
             f"Dry Run: [cyan]{dry_run}[/cyan]",
@@ -59,7 +61,7 @@ def cmd_score(args):
         "[bold green]Evaluating jobs against candidate profile..."
     ) as status:
         metrics = asyncio.run(
-            score_pipeline(job_id=job_id, within_days=within_days, dry_run=dry_run)
+            score_pipeline(job_id=job_id, within_days=within_days, company_slug=company, dry_run=dry_run)
         )
 
     console.print("\n[bold green]Scoring Stage Complete![/bold green]")
@@ -844,6 +846,12 @@ def main():
     )
     parser_score.add_argument(
         "--job", type=str, default=None, help="Specific job ID to score"
+    )
+    parser_score.add_argument(
+        "--company",
+        type=str,
+        default=None,
+        help="Specific company slug to score (e.g. 'retool')",
     )
     parser_score.add_argument(
         "--within-days",

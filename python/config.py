@@ -90,8 +90,15 @@ TARGET_COMPANIES = [
     {
         "name": "Salesforce",
         "slug": "salesforce",
-        "board": "Salesforce_External_Career_Site",
-        "wd": "wd3",
+        "board": "External_Career_Site",
+        "wd": "wd12",
+        "source": "workday",
+    },
+    {
+        "name": "Nvidia",
+        "slug": "nvidia",
+        "board": "NVIDIAExternalCareerSite",
+        "wd": "wd5",
         "source": "workday",
     },
     {

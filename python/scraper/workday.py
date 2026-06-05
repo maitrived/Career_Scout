@@ -1,4 +1,5 @@
 import httpx
+import json
 import logging
 from typing import List, Dict, Any
 from .base import BaseScraper
@@ -32,7 +33,8 @@ class WorkdayScraper(BaseScraper):
                 browser = await pw.chromium.launch(headless=True)
                 # Create context with a realistic user agent
                 context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    ignore_https_errors=True
                 )
                 page = await context.new_page()
                 
@@ -56,8 +58,8 @@ class WorkdayScraper(BaseScraper):
                     
                     try:
                         r = await page.request.post(
-                            url, 
-                            data=payload,
+                            url,
+                            data=json.dumps(payload),
                             headers={"Accept": "application/json", "Content-Type": "application/json"}
                         )
                         if not r.ok:

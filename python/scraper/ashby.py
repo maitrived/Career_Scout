@@ -31,7 +31,7 @@ class AshbyScraper(BaseScraper):
         url = f"https://api.ashbyhq.com/posting-api/job-board/{target}"
         logger.info(f"Fetching Ashby jobs from: {url}")
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
             try:
                 response = await client.get(url)
                 if response.status_code == 404:

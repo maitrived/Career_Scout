@@ -18,7 +18,7 @@ class JobviteScraper(BaseScraper):
         
         all_jobs = []
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
+            async with httpx.AsyncClient(timeout=15, verify=False) as client:
                 r = await client.get(self.BASE, params={"c": target})
                 if r.status_code != 200:
                     logger.warning(f"Jobvite API returned {r.status_code} for {target}")

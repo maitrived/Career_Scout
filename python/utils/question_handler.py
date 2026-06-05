@@ -222,6 +222,51 @@ RULES:
             tag_name = await element.evaluate("el => el.tagName.toLowerCase()")
             type_attr = (await element.get_attribute("type") or "").lower()
 
+            # --- React Select detection ---
+            is_react_select = await element.evaluate("""el => {
+                let curr = el.parentElement;
+                for (let i = 0; i < 5; i++) {
+                    if (!curr) break;
+                    if (curr.className && curr.className.includes('select__control')) return true;
+                    if (curr.className && curr.className.includes('Select__control')) return true;
+                    curr = curr.parentElement;
+                }
+                return false;
+            }""")
+            
+            if is_react_select:
+                try:
+                    await element.click()
+                    import asyncio
+                    await asyncio.sleep(0.3)
+                    await element.fill(answer)
+                    await asyncio.sleep(1.0)
+                    for sel in [
+                        f'[class*="select__option"]:has-text("{answer}")',
+                        '[class*="select__option"]',
+                        f'[class*="Select__option"]:has-text("{answer}")',
+                        '[class*="Select__option"]',
+                    ]:
+                        try:
+                            opts = page.locator(sel)
+                            count = await opts.count()
+                            val_lower = answer.lower()
+                            for i in range(min(count, 20)):
+                                opt = opts.nth(i)
+                                if not await opt.is_visible():
+                                    continue
+                                text = (await opt.inner_text()).strip().lower()
+                                if val_lower in text or text in val_lower:
+                                    await opt.click()
+                                    return True
+                            if count == 1 and await opts.first.is_visible():
+                                await opts.first.click()
+                                return True
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+
             if tag_name == "select":
                 # 1. Exact label match
                 try:

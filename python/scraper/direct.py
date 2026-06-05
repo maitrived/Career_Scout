@@ -76,7 +76,36 @@ async def extract_supabase(page: Page) -> List[Dict[str, Any]]:
 
 
 async def extract_stripe(page: Page) -> List[Dict[str, Any]]:
-    """Scrapes https://stripe.com/jobs"""
+    """Scrapes Stripe via HTTP API instead of Playwright"""
+    import httpx
+    jobs = []
+    try:
+        async with httpx.AsyncClient(verify=False) as client:
+            r = await client.get(
+                "https://stripe.com/jobs/search.json",
+                headers={"Accept": "application/json"}
+            )
+            if r.status_code == 200:
+                data = r.json()
+                for item in data.get("jobs", []):
+                    title = item.get("title")
+                    slug = item.get("slug")
+                    location = item.get("location")
+                    if title and slug:
+                        url = f"https://stripe.com/jobs/listing/{slug}"
+                        jobs.append({
+                            "title": title,
+                            "url": url,
+                            "location": location or "Remote",
+                            "external_id": hashlib.md5(url.encode()).hexdigest(),
+                            "company": "Stripe",
+                            "raw_jd": ""
+                        })
+                return jobs
+    except Exception as e:
+        logger.error(f"Failed to fetch Stripe jobs via JSON API: {e}")
+        
+    # Fallback to Playwright if API fails
     await page.goto("https://stripe.com/jobs/search", wait_until="networkidle", timeout=30000)
     await page.wait_for_timeout(3000)
 
@@ -101,7 +130,39 @@ async def extract_stripe(page: Page) -> List[Dict[str, Any]]:
 
 
 async def extract_rippling(page: Page) -> List[Dict[str, Any]]:
-    """Scrapes https://ats.rippling.com/rippling/jobs"""
+    """Scrapes Rippling via HTTP API instead of Playwright"""
+    import httpx
+    jobs = []
+    try:
+        async with httpx.AsyncClient(verify=False) as client:
+            # We don't have the exact JSON endpoint but we will try the one provided by the user
+            r = await client.get(
+                "https://ats.rippling.com/api/ats/v1/jobs",
+                params={"limit": 50, "offset": 0},
+                headers={"Accept": "application/json"}
+            )
+            if r.status_code == 200:
+                data = r.json()
+                for item in data: # Assume list of jobs or data.get('jobs')
+                    if isinstance(item, dict):
+                        title = item.get("name") or item.get("title")
+                        url = item.get("url")
+                        location = item.get("location")
+                        if title and url:
+                            jobs.append({
+                                "title": title,
+                                "url": url,
+                                "location": location or "",
+                                "external_id": hashlib.md5(url.encode()).hexdigest(),
+                                "company": "Rippling",
+                                "raw_jd": ""
+                            })
+                if jobs:
+                    return jobs
+    except Exception as e:
+        logger.error(f"Failed to fetch Rippling jobs via JSON API: {e}")
+        
+    # Fallback to Playwright
     await page.goto("https://ats.rippling.com/rippling/jobs", wait_until="networkidle", timeout=30000)
     await page.wait_for_timeout(3000)
 
@@ -160,7 +221,8 @@ class DirectScraper(BaseScraper):
                 browser: Browser = await pw.chromium.launch(headless=True)
                 context = await browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    ignore_https_errors=True
                 )
                 page = await context.new_page()
 

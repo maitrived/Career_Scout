@@ -31,7 +31,7 @@ class LeverScraper(BaseScraper):
         url = f"https://api.lever.co/v0/postings/{target}?mode=json"
         logger.info(f"Fetching Lever jobs from: {url}")
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
             try:
                 response = await client.get(url)
                 if response.status_code == 404:

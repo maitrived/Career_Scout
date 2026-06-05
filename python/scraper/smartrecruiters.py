@@ -20,7 +20,7 @@ class SmartRecruitersScraper(BaseScraper):
         limit = 100
         
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
+            async with httpx.AsyncClient(timeout=15, verify=False) as client:
                 # 1. Fetch paginated list of jobs
                 while True:
                     r = await client.get(

@@ -31,7 +31,7 @@ class GreenhouseScraper(BaseScraper):
         url = f"https://boards-api.greenhouse.io/v1/boards/{target}/jobs?content=true"
         logger.info(f"Fetching Greenhouse jobs from: {url}")
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
             try:
                 response = await client.get(url)
                 if response.status_code == 404:
