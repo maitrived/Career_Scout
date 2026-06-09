@@ -47,59 +47,90 @@ class WorkdayScraper(BaseScraper):
                     logger.warning(f"Error pre-warming workday page for {subdomain}: {e}")
                 
                 # Now we can query Workday via page.request, which carries the CSRF tokens and cookies
+                api_url = f"https://{subdomain}.{wd}.myworkdayjobs.com/wday/cxs/{subdomain}/{board}/jobs"
                 for keyword in KEYWORD_FILTERS:
-                    url = f"https://{subdomain}.{wd}.myworkdayjobs.com/wday/cxs/{subdomain}/{board}/jobs"
-                    payload = {
-                        "appliedFacets": {},
-                        "limit": 20,
-                        "offset": 0,
-                        "searchText": keyword
-                    }
+                    offset = 0
+                    limit = 20
+                    consecutive_empty_pages = 0
                     
-                    try:
-                        r = await page.request.post(
-                            url,
-                            data=json.dumps(payload),
-                            headers={"Accept": "application/json", "Content-Type": "application/json"}
-                        )
-                        if not r.ok:
-                            text = await r.text()
-                            logger.warning(f"Workday API returned {r.status} for {subdomain}: {text}")
-                            continue
-                            
-                        data = await r.json()
-                        jobs_raw = data.get("jobPostings", [])
+                    while True:
+                        payload = {
+                            "appliedFacets": {},
+                            "limit": limit,
+                            "offset": offset,
+                            "searchText": keyword
+                        }
                         
-                        for raw in jobs_raw:
-                            ext_path = raw.get("externalPath", "")
-                            if not ext_path or ext_path in seen_ids:
-                                continue
+                        try:
+                            r = await page.request.post(
+                                api_url,
+                                data=json.dumps(payload),
+                                headers={"Accept": "application/json", "Content-Type": "application/json"}
+                            )
+                            if not r.ok:
+                                text = await r.text()
+                                logger.warning(f"Workday API returned {r.status} for {subdomain}: {text}")
+                                break
                                 
-                            seen_ids.add(ext_path)
+                            data = await r.json()
+                            jobs_raw = data.get("jobPostings", [])
+                            total_from_api = data.get("total", 0)
                             
-                            # Fetch job details (raw_jd)
-                            detail_url = f"https://{subdomain}.{wd}.myworkdayjobs.com/wday/cxs/{subdomain}/{board}{ext_path}"
-                            try:
-                                detail_r = await page.request.get(detail_url, headers={"Accept": "application/json"})
-                                if detail_r.ok:
-                                    detail_data = await detail_r.json()
-                                    raw["jobDescription"] = detail_data.get("jobPostingInfo", {}).get("jobDescription", "")
-                                else:
+                            if offset == 0:
+                                logger.info(f"Workday API reports {total_from_api} total jobs for '{keyword}' at {company_name}")
+                                
+                            if not jobs_raw:
+                                break
+                                
+                            page_kept = 0
+                            for raw in jobs_raw:
+                                ext_path = raw.get("externalPath", "")
+                                if not ext_path or ext_path in seen_ids:
+                                    continue
+                                    
+                                seen_ids.add(ext_path)
+                                page_kept += 1
+                                
+                                # Fetch job details (raw_jd)
+                                detail_url = f"https://{subdomain}.{wd}.myworkdayjobs.com/wday/cxs/{subdomain}/{board}{ext_path}"
+                                try:
+                                    detail_r = await page.request.get(detail_url, headers={"Accept": "application/json"})
+                                    if detail_r.ok:
+                                        detail_data = await detail_r.json()
+                                        raw["jobDescription"] = detail_data.get("jobPostingInfo", {}).get("jobDescription", "")
+                                    else:
+                                        raw["jobDescription"] = ""
+                                except Exception as ex:
+                                    logger.error(f"Error fetching detail for {ext_path}: {ex}")
                                     raw["jobDescription"] = ""
-                            except Exception as ex:
-                                logger.error(f"Error fetching detail for {ext_path}: {ex}")
-                                raw["jobDescription"] = ""
+                                    
+                                # Inject config variables for normalize()
+                                raw["_subdomain"] = subdomain
+                                raw["_board"] = board
+                                raw["_wd"] = wd
                                 
-                            # Inject config variables for normalize()
-                            raw["_subdomain"] = subdomain
-                            raw["_board"] = board
-                            raw["_wd"] = wd
+                                job_model = self.normalize(raw, company_name)
+                                all_jobs.append(job_model)
+                                
+                            logger.info(f"  [{keyword}] Page offset={offset}: {len(jobs_raw)} returned, {page_kept} kept (total unique: {len(all_jobs)})")
                             
-                            job_model = self.normalize(raw, company_name)
-                            all_jobs.append(job_model)
+                            if page_kept == 0:
+                                consecutive_empty_pages += 1
+                            else:
+                                consecutive_empty_pages = 0
+                                
+                            offset += limit
                             
-                    except Exception as ex:
-                        logger.error(f"Error fetching workday jobs for {subdomain} with keyword '{keyword}': {ex}")
+                            if offset >= total_from_api:
+                                break
+                                
+                            if consecutive_empty_pages >= 3:
+                                logger.info(f"  [{keyword}] 3 consecutive empty pages — skipping remaining results")
+                                break
+                                
+                        except Exception as ex:
+                            logger.error(f"Error fetching workday jobs for {subdomain} with keyword '{keyword}' at offset {offset}: {ex}")
+                            break
                         
                 await browser.close()
                 

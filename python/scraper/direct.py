@@ -51,21 +51,50 @@ async def extract_notion(page: Page) -> List[Dict[str, Any]]:
 
 
 async def extract_supabase(page: Page) -> List[Dict[str, Any]]:
-    """Scrapes https://supabase.com/careers"""
+    """Scrapes Supabase via the Ashby API — returns jobs with full JDs in one call."""
+    import httpx
+    import re
+    jobs = []
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=20) as client:
+            r = await client.get("https://api.ashbyhq.com/posting-api/job-board/supabase")
+            if r.status_code == 200:
+                data = r.json()
+                for item in data.get("jobs", []):
+                    title = item.get("title", "")
+                    job_url = item.get("applyUrl", item.get("jobUrl", ""))
+                    location = item.get("location", "Remote")
+                    # descriptionPlain is the clean plain-text JD — no HTML parsing needed
+                    raw_jd = item.get("descriptionPlain", "") or ""
+                    # Strip excess whitespace
+                    raw_jd = re.sub(r'\n{3,}', '\n\n', raw_jd).strip()
+                    if title and job_url:
+                        jobs.append({
+                            "title": title,
+                            "url": job_url,
+                            "location": location,
+                            "external_id": item.get("id", hashlib.md5(job_url.encode()).hexdigest()),
+                            "company": "Supabase",
+                            "raw_jd": raw_jd[:8000],
+                        })
+                logger.info(f"Supabase Ashby API returned {len(jobs)} jobs")
+                return jobs
+    except Exception as e:
+        logger.error(f"Failed to fetch Supabase jobs via Ashby API: {e}")
+
+    # Fallback: Playwright scrape of the careers page (no JD available this way)
+    logger.warning("Falling back to Playwright for Supabase — JDs will be empty")
     await page.goto("https://supabase.com/careers", wait_until="networkidle", timeout=30000)
     await page.wait_for_timeout(2000)
-
     jobs = await page.evaluate("""
         () => {
             const results = [];
-            document.querySelectorAll('a[href*="/careers/"]').forEach(el => {
+            document.querySelectorAll('a[href*="ashbyhq.com/supabase/"]').forEach(el => {
                 const href = el.href;
                 const title = el.querySelector('h3, h2, [class*="title"]')?.textContent?.trim()
                            || el.textContent?.trim();
                 const location = el.querySelector('[class*="location"]')?.textContent?.trim() || 'Remote';
-                if (title && href && href.includes('/careers/') && !href.endsWith('/careers/')) {
-                    results.push({ title, url: href, location });
-                }
+                if (title && href) results.push({ title, url: href, location });
             });
             return results;
         }
@@ -76,57 +105,73 @@ async def extract_supabase(page: Page) -> List[Dict[str, Any]]:
 
 
 async def extract_stripe(page: Page) -> List[Dict[str, Any]]:
-    """Scrapes Stripe via HTTP API instead of Playwright"""
+    """Scrapes Stripe via Playwright (JS-rendered) then fetches JDs from detail pages."""
     import httpx
+    import re
     jobs = []
-    try:
-        async with httpx.AsyncClient(verify=False) as client:
-            r = await client.get(
-                "https://stripe.com/jobs/search.json",
-                headers={"Accept": "application/json"}
-            )
-            if r.status_code == 200:
-                data = r.json()
-                for item in data.get("jobs", []):
-                    title = item.get("title")
-                    slug = item.get("slug")
-                    location = item.get("location")
-                    if title and slug:
-                        url = f"https://stripe.com/jobs/listing/{slug}"
-                        jobs.append({
-                            "title": title,
-                            "url": url,
-                            "location": location or "Remote",
-                            "external_id": hashlib.md5(url.encode()).hexdigest(),
-                            "company": "Stripe",
-                            "raw_jd": ""
-                        })
-                return jobs
-    except Exception as e:
-        logger.error(f"Failed to fetch Stripe jobs via JSON API: {e}")
-        
-    # Fallback to Playwright if API fails
-    await page.goto("https://stripe.com/jobs/search", wait_until="networkidle", timeout=30000)
-    await page.wait_for_timeout(3000)
 
-    jobs = await page.evaluate("""
-        () => {
-            const results = [];
-            document.querySelectorAll('a[href*="/jobs/listing/"]').forEach(el => {
-                const href = el.href;
-                const title = el.querySelector('[class*="JobCard__title"], h3, h2')?.textContent?.trim()
-                           || el.textContent?.trim();
-                const location = el.querySelector('[class*="location"], [class*="Location"]')?.textContent?.trim() || '';
-                if (title && href) {
-                    results.push({ title, url: href, location });
-                }
-            });
-            return results;
-        }
-    """)
-    return [{"title": j["title"], "url": j["url"], "location": j["location"],
-             "external_id": hashlib.md5(j["url"].encode()).hexdigest(),
-             "company": "Stripe", "raw_jd": ""} for j in jobs if j.get("title")]
+    # Step 1: Get job listings via Playwright (the search page is JS-rendered)
+    try:
+        await page.goto("https://stripe.com/jobs/search", wait_until="networkidle", timeout=30000)
+        await page.wait_for_timeout(3000)
+
+        raw_listings = await page.evaluate("""
+            () => {
+                const results = [];
+                document.querySelectorAll('a[href*="/jobs/listing/"]').forEach(el => {
+                    const href = el.href;
+                    const title = el.querySelector('[class*="JobCard__title"], h3, h2')?.textContent?.trim()
+                               || el.textContent?.trim();
+                    const location = el.querySelector('[class*="location"], [class*="Location"]')?.textContent?.trim() || '';
+                    if (title && href) results.push({ title, url: href, location });
+                });
+                return results;
+            }
+        """)
+        logger.info(f"Stripe Playwright found {len(raw_listings)} job listings")
+    except Exception as e:
+        logger.error(f"Stripe Playwright listing scrape failed: {e}")
+        raw_listings = []
+
+    if not raw_listings:
+        return []
+
+    # Step 2: Fetch JD from each detail page via httpx
+    async with httpx.AsyncClient(verify=False, timeout=15) as client:
+        for item in raw_listings:
+            url = item.get("url", "")
+            raw_jd = ""
+            if url:
+                try:
+                    r = await client.get(url, headers={"Accept": "text/html"})
+                    if r.status_code == 200:
+                        # Extract visible text from the job description section
+                        # Stripe uses JSON-LD or structured data — try to grab plain text
+                        html = r.text
+                        # Pull text between common JD markers
+                        import re as _re
+                        # Remove script/style tags
+                        html_clean = _re.sub(r'<(script|style)[^>]*>.*?</(script|style)>', '', html, flags=_re.S)
+                        # Strip all HTML tags
+                        text = _re.sub(r'<[^>]+>', ' ', html_clean)
+                        # Collapse whitespace
+                        text = _re.sub(r'[ \t]+', ' ', text)
+                        text = _re.sub(r'\n{3,}', '\n\n', text).strip()
+                        raw_jd = text[:8000]
+                except Exception as ex:
+                    logger.debug(f"Could not fetch Stripe JD for {url}: {ex}")
+
+            jobs.append({
+                "title": item["title"],
+                "url": url,
+                "location": item.get("location", ""),
+                "external_id": hashlib.md5(url.encode()).hexdigest(),
+                "company": "Stripe",
+                "raw_jd": raw_jd,
+            })
+
+    logger.info(f"Stripe: fetched JDs for {sum(1 for j in jobs if j['raw_jd'])} / {len(jobs)} jobs")
+    return jobs
 
 
 async def extract_rippling(page: Page) -> List[Dict[str, Any]]:

@@ -92,7 +92,8 @@ class AshbyScraper(BaseScraper):
                 is_remote = True
                 break
 
-        url = raw.get("jobBoardUrl", f"https://jobs.ashbyhq.com/{company}/{external_id}")
+        # We want the application form URL for the automated applier
+        url = raw.get("applyUrl", raw.get("jobUrl", f"https://jobs.ashbyhq.com/{raw.get('jobBoard', company)}/{external_id}/application"))
         
         # Ashby jobs usually provide descriptionHtml or descriptionPlain
         raw_content = raw.get("descriptionHtml", raw.get("descriptionPlain", raw.get("description", "")))

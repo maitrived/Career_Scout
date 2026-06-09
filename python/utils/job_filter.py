@@ -22,7 +22,11 @@ ALLOWED_LOCATIONS = [
     # Major US tech hubs/states for safety
     r"\bca\b", r"\bcalifornia\b", r"\bny\b", r"\bnew york\b", r"\bwa\b", r"\bwashington\b",
     r"\btx\b", r"\btexas\b", r"\baz\b", r"\barizona\b", r"\bil\b", r"\billinois\b",
-    r"\bco\b", r"\bcolorado\b", r"\bma\b", r"\bmassachusetts\b"
+    r"\bco\b", r"\bcolorado\b", r"\bma\b", r"\bmassachusetts\b",
+    # Major cities that might appear without states
+    r"\bsan jose\b", r"\bsan francisco\b", r"\bsf\b", r"\bseattle\b", r"\baustin\b",
+    r"\bnyc\b", r"\bboston\b", r"\bchicago\b", r"\bdenver\b", r"\batlanta\b",
+    r"\blos angeles\b", r"\bla\b", r"\bsan diego\b", r"\bdallas\b", r"\bh Houston\b"
 ]
 
 def passes_job_filter(job: Job) -> bool:
