@@ -63,6 +63,36 @@ TARGET_COMPANIES = [
     {"name": "Reddit", "slug": "reddit", "source": "greenhouse"},
     {"name": "Postman", "slug": "postman", "source": "greenhouse"},
     {"name": "Temporal", "slug": "temporal", "source": "greenhouse"},
+    {"name": "DV Trading", "slug": "dvtrading", "source": "greenhouse"},
+    {"name": "Pilot HQ", "slug": "pilothq", "source": "greenhouse"},
+    {"name": "Clover Health", "slug": "cloverhealth", "source": "greenhouse"},
+    # User-added Greenhouse companies
+    {"name": "Together AI", "slug": "togetherai", "source": "greenhouse"},
+    {"name": "Mixpanel", "slug": "mixpanel", "source": "greenhouse"},
+    {"name": "Amplitude", "slug": "amplitude", "source": "greenhouse"},
+    {"name": "Brex", "slug": "brex", "source": "greenhouse"},
+    {"name": "Tanium", "slug": "tanium", "source": "greenhouse"},
+    {"name": "Flexport", "slug": "flexport", "source": "greenhouse"},
+    {"name": "project44", "slug": "project44", "source": "greenhouse"},
+    {"name": "Salsify", "slug": "salsify", "source": "greenhouse"},
+    {"name": "Coinbase", "slug": "coinbase", "source": "greenhouse"},
+    {"name": "Robinhood", "slug": "robinhood", "source": "greenhouse"},
+    {"name": "Lyft", "slug": "lyft", "source": "greenhouse"},
+    {"name": "Instacart", "slug": "instacart", "source": "greenhouse"},
+    {"name": "Waymo", "slug": "waymo", "source": "greenhouse"},
+    {"name": "Dropbox", "slug": "dropbox", "source": "greenhouse"},
+    {"name": "Twitch", "slug": "twitch", "source": "greenhouse"},
+    {"name": "Intercom", "slug": "intercom", "source": "greenhouse"},
+    {"name": "Klaviyo", "slug": "klaviyo", "source": "greenhouse"},
+    {"name": "Contentful", "slug": "contentful", "source": "greenhouse"},
+    {"name": "Typeform", "slug": "typeform", "source": "greenhouse"},
+    {"name": "Airtable", "slug": "airtable", "source": "greenhouse"},
+    {"name": "Duolingo", "slug": "duolingo", "source": "greenhouse"},
+    {"name": "Coursera", "slug": "coursera", "source": "greenhouse"},
+    {"name": "Oscar", "slug": "oscar", "source": "greenhouse"},
+    {"name": "Carta", "slug": "carta", "source": "greenhouse"},
+    {"name": "Remote", "slug": "remote", "source": "greenhouse"},
+    {"name": "Lattice", "slug": "lattice", "source": "greenhouse"},
     # NOTE: Tome shut down April 2025 — removed
     # NOTE: Coda acquired by Grammarly/Superhuman Dec 2024 — removed
     # NOTE: Rippling uses proprietary ATS — no public API; removed
@@ -73,6 +103,8 @@ TARGET_COMPANIES = [
         "slug": "octane-ai",
         "source": "lever",
     },  # correct slug (not octaneai)
+    {"name": "WHOOP", "slug": "whoop", "source": "lever"},
+    {"name": "Arrive Logistics", "slug": "arrivelogistics", "source": "lever"},
     # ── Ashby ─────────────────────────────────────────────────────────────
     {"name": "Warp", "slug": "warp", "source": "ashby"},
     {"name": "Vantage", "slug": "vantage", "source": "ashby"},
@@ -85,6 +117,25 @@ TARGET_COMPANIES = [
     },  # moved from Greenhouse
     {"name": "Retool", "slug": "retool", "source": "ashby"},  # moved from Greenhouse
     {"name": "Coder", "slug": "coder", "source": "ashby"},  # moved from Lever
+    {"name": "Pylon Labs", "slug": "pylon-labs", "source": "ashby"},
+    {"name": "Nooks", "slug": "nooks", "source": "ashby"},
+    {"name": "Northwood Space", "slug": "NorthwoodSpace", "source": "ashby"},
+    {"name": "Compa", "slug": "compa", "source": "ashby"},
+    {"name": "Authorium", "slug": "Authorium", "source": "ashby"},
+    {"name": "Chalk", "slug": "chalk", "source": "ashby"},
+    {"name": "OpenAI", "slug": "openai", "source": "ashby"},
+    {"name": "Tessera Labs", "slug": "tessera-labs", "source": "ashby"},
+    {"name": "Stainless API", "slug": "stainlessapi", "source": "ashby"},
+    {"name": "Distyl", "slug": "Distyl", "source": "ashby"},
+    {"name": "Rillet", "slug": "rillet", "source": "ashby"},
+    {"name": "Column", "slug": "column", "source": "ashby"},
+    {"name": "Zip", "slug": "zip", "source": "ashby"},
+    {"name": "1Password", "slug": "1password", "source": "ashby"},
+    {"name": "Heliux", "slug": "heliux", "source": "ashby"},
+    {"name": "Lambda Labs", "slug": "Lambda", "source": "ashby"},
+    {"name": "Scribe", "slug": "scribe", "source": "ashby"},
+    {"name": "Render", "slug": "render", "source": "ashby"},
+    {"name": "Notion", "slug": "notion", "source": "ashby"},
     # ── Workday ───────────────────────────────────────────────────────────
     # Format: tenant.wd{N}.myworkdayjobs.com  →  board
     {
@@ -157,12 +208,53 @@ TARGET_COMPANIES = [
         "wd": "wd5",
         "source": "workday",
     },
+    {
+        "name": "WGU",
+        "slug": "wgu",
+        "board": "External",
+        "wd": "wd5",
+        "source": "workday",
+    },
+    {
+        "name": "Microchip",
+        "slug": "microchiphr",
+        "board": "External",
+        "wd": "wd5",
+        "source": "workday",
+    },
+    {
+        "name": "OCLC",
+        "slug": "oclc",
+        "board": "OCLC_Careers",
+        "wd": "wd1",
+        "source": "workday",
+    },
+    {
+        "name": "Visa",
+        "slug": "visa",
+        "board": "Visa",
+        "wd": "wd5",
+        "source": "workday",
+    },
+    {
+        "name": "Autodesk",
+        "slug": "autodesk",
+        "board": "Ext",
+        "wd": "wd1",
+        "source": "workday",
+    },
+    {
+        "name": "Univision",
+        "slug": "univision",
+        "board": "External",
+        "wd": "wd1",
+        "source": "workday",
+    },
     # ── SmartRecruiters ───────────────────────────────────────────────────
     {"name": "Delivery Hero", "slug": "DeliveryHero", "source": "smartrecruiters"},
     # NOTE: Booking.com — proprietary Phenom People ATS, no public API; removed
     # NOTE: Twitter/X — internal proprietary ATS, no public API; removed
     # ── Direct (Playwright) ───────────────────────────────────────────────
-    {"name": "Notion", "slug": "notion", "source": "direct"},
     {"name": "Supabase", "slug": "supabase", "source": "direct"},
     {"name": "Stripe", "slug": "stripe", "source": "direct"},
     {"name": "Rippling", "slug": "rippling", "source": "direct"},
