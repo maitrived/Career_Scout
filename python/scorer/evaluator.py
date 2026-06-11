@@ -89,6 +89,20 @@ class JobEvaluator:
         
         # Load resume context once during initialization
         self.resume_text = self._load_resume()
+        # Load resume.json as structured preferences
+        self.resume_json = self._load_resume_json()
+
+    def _load_resume_json(self) -> dict:
+        """Load `data/resume.json` to access structured preferences like relocation."""
+        try:
+            resume_path = Path("data/resume.json")
+            if not resume_path.exists():
+                resume_path = Path(__file__).resolve().parent.parent.parent / "data" / "resume.json"
+            if resume_path.exists():
+                return json.loads(resume_path.read_text(encoding="utf-8"))
+        except Exception as ex:
+            logger.debug(f"Could not load resume.json: {ex}")
+        return {}
 
     @tenacity.retry(
         retry=tenacity.retry_if_exception(is_rate_limit_error),
@@ -190,7 +204,33 @@ Evaluate the following Job Posting against Parva's Resume.
         try:
             raw_text = self._create_completion(prompt)
             output = LLMScoreOutput.model_validate_json(raw_text)
-            
+
+            # If candidate is willing to relocate, treat culture_signal as perfect (5.0)
+            try:
+                willing = bool(self.resume_json.get("willing_to_relocate", False))
+            except Exception:
+                willing = False
+            if willing:
+                culture_signal_val = 5.0
+            else:
+                culture_signal_val = output.culture_signal
+
+            # If willing to relocate, remove location-related red flags produced by the LLM
+            filtered_red_flags = []
+            try:
+                raw_flags = output.red_flags or []
+                if willing:
+                    for rf in raw_flags:
+                        rf_lower = str(rf).lower()
+                        if any(k in rf_lower for k in ["onsite", "on-site", "location", "located", "commute"]):
+                            # drop this flag because candidate is willing to relocate
+                            continue
+                        filtered_red_flags.append(rf)
+                else:
+                    filtered_red_flags = raw_flags
+            except Exception:
+                filtered_red_flags = output.red_flags
+
             # Calculate overall score programmatically based on rubric weights:
             # - tech_fit: 35%
             # - level_fit: 25%
@@ -200,14 +240,14 @@ Evaluate the following Job Posting against Parva's Resume.
                 (output.tech_fit * 0.35) + 
                 (output.level_fit * 0.25) + 
                 (output.growth_signal * 0.20) + 
-                (output.culture_signal * 0.20)
+                (culture_signal_val * 0.20)
             )
             
             # Round overall score to 2 decimal places
             overall = round(overall, 2)
             
             # If red flags exist (other than ["None"]), force overall score down to cap at 3.0 to prevent advancement
-            has_red_flags = len(output.red_flags) > 0 and output.red_flags != ["None"] and output.red_flags != ["none"]
+            has_red_flags = len(filtered_red_flags) > 0 and filtered_red_flags != ["None"] and filtered_red_flags != ["none"]
             if has_red_flags and overall >= 3.5:
                 overall = 3.0
                 
@@ -218,9 +258,9 @@ Evaluate the following Job Posting against Parva's Resume.
                 tech_fit=output.tech_fit,
                 level_fit=output.level_fit,
                 growth_signal=output.growth_signal,
-                culture_signal=output.culture_signal,
+                culture_signal=culture_signal_val,
                 rationale=output.rationale,
-                red_flags=output.red_flags
+                red_flags=filtered_red_flags
             )
             
         except Exception as ex:
