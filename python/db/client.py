@@ -4,7 +4,7 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
-from python.db.models import Job, Score, ResumeVersion, Application
+from python.db.models import Job, Score, ResumeVersion, Application, Outreach
 
 DB_PATH = os.path.join("data", "auto_applier.db")
 
@@ -114,6 +114,41 @@ def init_db():
         FOREIGN KEY (resume_version_id) REFERENCES resume_versions(id) ON DELETE SET NULL
     );
     """)
+
+    # 5. Outreach table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS outreach (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        contact_name TEXT,
+        contact_title TEXT,
+        contact_email TEXT,
+        contact_linkedin TEXT,
+        contact_headline TEXT,
+        contact_about TEXT,
+        company_domain TEXT,
+        team_name TEXT,
+        email_subject TEXT,
+        email_body TEXT,
+        gmail_draft_id TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        sent_at TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+    );
+    """)
+
+    # Self-healing migration for outreach table (v2 columns)
+    cursor.execute("PRAGMA table_info(outreach)")
+    outreach_cols = [row[1] for row in cursor.fetchall()]
+    if "contact_linkedin" not in outreach_cols:
+        cursor.execute("ALTER TABLE outreach ADD COLUMN contact_linkedin TEXT;")
+    if "contact_headline" not in outreach_cols:
+        cursor.execute("ALTER TABLE outreach ADD COLUMN contact_headline TEXT;")
+    if "contact_about" not in outreach_cols:
+        cursor.execute("ALTER TABLE outreach ADD COLUMN contact_about TEXT;")
+    if "gmail_draft_id" not in outreach_cols:
+        cursor.execute("ALTER TABLE outreach ADD COLUMN gmail_draft_id TEXT;")
 
     conn.commit()
     conn.close()
@@ -592,3 +627,189 @@ def get_pipeline_status() -> dict[str, int]:
         "rejected": apps_by_status.get("rejected", 0),
         "offer": apps_by_status.get("offer", 0),
     }
+
+# ==========================================
+# Outreach Operations
+# ==========================================
+
+def save_outreach(out: Outreach) -> Outreach:
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    if not out.id:
+        out.id = uuid.uuid4()
+    if not out.created_at:
+        out.created_at = datetime.utcnow()
+
+    sent_at_str = (
+        out.sent_at.isoformat()
+        if isinstance(out.sent_at, datetime)
+        else (str(out.sent_at) if out.sent_at else None)
+    )
+    created_at_str = (
+        out.created_at.isoformat()
+        if isinstance(out.created_at, datetime)
+        else str(out.created_at)
+    )
+
+    cursor.execute(
+        """
+    INSERT INTO outreach (
+        id, job_id, contact_name, contact_title, contact_email, contact_linkedin,
+        contact_headline, contact_about, company_domain, team_name, email_subject, 
+        email_body, gmail_draft_id, status, sent_at, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+        contact_name=excluded.contact_name,
+        contact_title=excluded.contact_title,
+        contact_email=excluded.contact_email,
+        contact_linkedin=excluded.contact_linkedin,
+        contact_headline=excluded.contact_headline,
+        contact_about=excluded.contact_about,
+        company_domain=excluded.company_domain,
+        team_name=excluded.team_name,
+        email_subject=excluded.email_subject,
+        email_body=excluded.email_body,
+        gmail_draft_id=excluded.gmail_draft_id,
+        status=excluded.status,
+        sent_at=excluded.sent_at
+    """,
+        (
+            str(out.id),
+            str(out.job_id),
+            out.contact_name,
+            out.contact_title,
+            out.contact_email,
+            out.contact_linkedin,
+            out.contact_headline,
+            out.contact_about,
+            out.company_domain,
+            out.team_name,
+            out.email_subject,
+            out.email_body,
+            out.gmail_draft_id,
+            out.status,
+            sent_at_str,
+            created_at_str,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return out
+
+
+def get_jobs_without_outreach(min_score: float = 3.5) -> list[Job]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT j.* 
+    FROM jobs j
+    JOIN scores s ON j.id = s.job_id
+    LEFT JOIN outreach o ON j.id = o.job_id
+    WHERE s.overall_score >= ?
+      AND o.id IS NULL
+    ORDER BY s.overall_score DESC
+    """, (min_score,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    jobs = []
+    for row in rows:
+        posted_at_val = None
+        if row["posted_at"]:
+            try:
+                posted_at_val = datetime.fromisoformat(row["posted_at"])
+            except Exception:
+                pass
+        jobs.append(Job(
+            id=uuid.UUID(row["id"]),
+            source=row["source"],
+            external_id=row["external_id"],
+            company=row["company"],
+            title=row["title"],
+            location=row["location"],
+            remote=bool(row["remote"]) if row["remote"] is not None else None,
+            url=row["url"],
+            raw_jd=row["raw_jd"],
+            scraped_at=datetime.fromisoformat(row["scraped_at"]),
+            posted_at=posted_at_val,
+        ))
+    return jobs
+
+
+def get_outreach_drafts() -> list[dict]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT o.id, o.job_id, j.company, j.title,
+           o.contact_name, o.contact_email, o.contact_linkedin,
+           o.email_subject, o.gmail_draft_id, o.status
+    FROM outreach o
+    JOIN jobs j ON o.job_id = j.id
+    WHERE o.status IN ('draft_saved', 'pending')
+    ORDER BY o.created_at DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+
+def get_outreach_by_id(outreach_id: str) -> Optional[Outreach]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM outreach WHERE id = ?", (str(outreach_id),))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return Outreach(
+        id=uuid.UUID(row["id"]),
+        job_id=uuid.UUID(row["job_id"]),
+        contact_name=row["contact_name"],
+        contact_title=row["contact_title"],
+        contact_email=row["contact_email"],
+        contact_linkedin=row["contact_linkedin"],
+        contact_headline=row["contact_headline"],
+        contact_about=row["contact_about"],
+        company_domain=row["company_domain"],
+        team_name=row["team_name"],
+        email_subject=row["email_subject"],
+        email_body=row["email_body"],
+        gmail_draft_id=row["gmail_draft_id"],
+        status=row["status"],
+        sent_at=datetime.fromisoformat(row["sent_at"]) if row["sent_at"] else None,
+        created_at=datetime.fromisoformat(row["created_at"])
+    )
+
+def get_outreach_by_job_id(job_id: str) -> Optional[Outreach]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM outreach WHERE job_id = ?", (str(job_id),))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return Outreach(
+        id=uuid.UUID(row["id"]),
+        job_id=uuid.UUID(row["job_id"]),
+        contact_name=row["contact_name"],
+        contact_title=row["contact_title"],
+        contact_email=row["contact_email"],
+        contact_linkedin=row["contact_linkedin"],
+        contact_headline=row["contact_headline"],
+        contact_about=row["contact_about"],
+        company_domain=row["company_domain"],
+        team_name=row["team_name"],
+        email_subject=row["email_subject"],
+        email_body=row["email_body"],
+        gmail_draft_id=row["gmail_draft_id"],
+        status=row["status"],
+        sent_at=datetime.fromisoformat(row["sent_at"]) if row["sent_at"] else None,
+        created_at=datetime.fromisoformat(row["created_at"])
+    )

@@ -62,3 +62,25 @@ class Application(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class Outreach(BaseModel):
+    id: UUID | None = None
+    job_id: UUID
+    contact_name: str | None = None
+    contact_title: str | None = None
+    contact_email: str | None = None
+    contact_linkedin: str | None = None
+    contact_headline: str | None = None
+    contact_about: str | None = None
+    company_domain: str | None = None
+    team_name: str | None = None
+    email_subject: str | None = None
+    email_body: str | None = None
+    gmail_draft_id: str | None = None
+    status: str = "pending"
+    sent_at: datetime | None = None
+    created_at: datetime | None = None
+
+    class Config:
+        from_attributes = True

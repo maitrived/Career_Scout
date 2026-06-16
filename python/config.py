@@ -17,6 +17,11 @@ APIFY_API_TOKEN = os.getenv("APIFY_API_TOKEN")
 SCRAPPER = os.getenv("SCRAPPER")
 PDF_SERVICE_PORT = int(os.getenv("PDF_SERVICE_PORT", "3001"))
 
+# Outreach configuration
+GMAIL_CLIENT_ID = os.getenv("GMAIL_CLIENT_ID")
+GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET")
+GMAIL_REFRESH_TOKEN = os.getenv("GMAIL_REFRESH_TOKEN")
+
 YC_ACTOR = os.getenv("YC_SCRAPPER")
 YC_CONFIG = {
     "startUrls": [

@@ -55,3 +55,25 @@ CREATE TABLE IF NOT EXISTS applications (
     FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
     FOREIGN KEY (resume_version_id) REFERENCES resume_versions(id) ON DELETE SET NULL
 );
+
+-- 5. Outreach table
+CREATE TABLE IF NOT EXISTS outreach (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    contact_name TEXT,
+    contact_title TEXT,
+    contact_email TEXT,
+    contact_linkedin TEXT,
+    contact_headline TEXT,
+    contact_about TEXT,
+    company_domain TEXT,
+    team_name TEXT,
+    email_subject TEXT,
+    email_body TEXT,
+    gmail_draft_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    -- pending | draft_saved | sent | replied
+    sent_at TEXT,                      -- ISO 8601 string datetime or NULL
+    created_at TEXT NOT NULL,          -- ISO 8601 string datetime
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+);
