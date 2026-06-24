@@ -75,11 +75,34 @@ class QuestionHandler:
     def fuzzy_match(self, label: str, bank: Dict[str, Any]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
         """Fuzzy matches a label text against keywords in a question bank."""
         label_lower = label.lower().strip()
+        best_key = None
+        best_entry = None
+        best_score = 0
+
+        # Score matches by number of keyword hits and keyword length (prefer longer keywords)
         for key, entry in bank.items():
             keywords = entry.get("keywords", [])
+            score = 0
             for kw in keywords:
-                if kw.lower() in label_lower:
-                    return key, entry
+                kw_clean = kw.lower().strip()
+                # prefer whole-word matches using word boundaries
+                try:
+                    import re
+                    if re.search(r"\b" + re.escape(kw_clean) + r"\b", label_lower):
+                        score += 10 + len(kw_clean)
+                    elif kw_clean in label_lower:
+                        score += 1 + len(kw_clean)
+                except Exception:
+                    if kw_clean in label_lower:
+                        score += 1
+            if score > best_score:
+                best_score = score
+                best_key = key
+                best_entry = entry
+
+        # require a minimal score to accept a match
+        if best_score >= 5:
+            return best_key, best_entry
         return None, None
 
     async def get_label_text(self, page: Page, element) -> str:
@@ -309,11 +332,39 @@ RULES:
                     return True
 
             elif tag_name == "input" and type_attr == "checkbox":
-                should_check = answer.lower() in ["yes", "true", "1", "checked", "agree", "y"]
-                is_checked = await element.is_checked()
-                if should_check != is_checked:
-                    await element.click()
-                return True
+                    # Handle both single boolean checkboxes and checkbox groups (multi-select)
+                    try:
+                        name = await element.get_attribute("name") or ""
+                        ans_list = [a.strip().lower() for a in ((answer or "") if isinstance(answer, list) else str(answer)).split(",")]
+                        if name:
+                            boxes = page.locator(f'input[type="checkbox"][name="{name}"]')
+                            count = await boxes.count()
+                            for i in range(count):
+                                b = boxes.nth(i)
+                                if not await b.is_visible():
+                                    continue
+                                bval = (await b.get_attribute("value") or "").strip().lower()
+                                blabel = ""
+                                bid = await b.get_attribute("id")
+                                if bid:
+                                    lbl = page.locator(f"label[for='{bid}']")
+                                    if await lbl.count() > 0:
+                                        blabel = (await lbl.first.inner_text()).strip().lower()
+                                # If any answer token matches value or label, ensure it's checked
+                                matched = any(tok in bval or tok in blabel for tok in ans_list if tok)
+                                is_checked = await b.is_checked()
+                                if matched and not is_checked:
+                                    await b.click()
+                                if not matched and is_checked and len(ans_list) == 1 and ans_list[0] in ["no", "false", "none"]:
+                                    await b.click()
+                            return True
+                    except Exception:
+                        # fallback to boolean logic
+                        should_check = answer.lower() in ["yes", "true", "1", "checked", "agree", "y"]
+                        is_checked = await element.is_checked()
+                        if should_check != is_checked:
+                            await element.click()
+                        return True
 
             else:
                 # Standard text/textarea — fill then check for autocomplete suggestions

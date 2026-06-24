@@ -23,7 +23,7 @@ python -m playwright install
 
 | Phase | Command                        | What it does                                                                                                                                                         |
 | ----- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1️⃣    | `scout.bat scrape`             | Pull jobs from Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Jobvite, Playwright Direct, and Apify (YC/Wellfound/LinkedIn).                                    |
+| 1️⃣    | `scout.bat scrape`             | Pull jobs from Greenhouse, Lever, Ashby, Workday, SmartRecruiters.                                                                                                   |
 | 2️⃣    | `scout.bat score`              | Score each job (only keep `overall_score ≥ 3.5`).                                                                                                                    |
 | 3️⃣    | `scout.bat tailor --job <id>`  | Generate a tailored résumé & cover‑letter (stored in the DB).                                                                                                        |
 | 4️⃣    | `scout.bat package --job <id>` | Render a PDF via Playwright (see `ts/`).                                                                                                                             |
@@ -50,6 +50,9 @@ Below are the primary CLI commands available via `scout.bat`. See `COMMANDS.md` 
 - `scout.bat mark --job <id> --status <status>` — Update an application's status (`ready`, `applied`, `followed_up`, `responded`, `rejected`, `offer`).
 - `scout.bat apply [--job <id>]` — Headful autofill of application forms; opens one tab per job (does not auto-submit). If `--job` provided, acts on a single package.
 - `scout.bat qa --list|--add|--edit <key>` — Manage the Q&A bank (list entries, add new, or edit existing entries).
+- `scout.bat outreach --job <job_id> --linkedin <url> --email <addr>` — Generate a personalized cold-email draft for the given job and contact (uses job context and `data/resume.json` for personalization). If --linkedin and --email are provided together, Scout will compose the message and, when an SMTP/Gmail sender is configured, may send it.
+- `scout.bat outreach --review` — List saved outreach drafts for review.
+- `scout.bat outreach --mark --job <job_id> --status <status>` — Mark an outreach record for tracking follow-ups (e.g. `sent`, `replied`, `pending`).
 
 ## Privacy – Do Not Commit Personal Data
 

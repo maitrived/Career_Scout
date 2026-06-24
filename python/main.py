@@ -16,6 +16,8 @@ from python.orchestrator import (
     process_single_job,
     validate_pipeline,
     import_pipeline,
+    process_contact,
+    prep_outreach,
 )
 from python.db.client import (
     get_pipeline_status,
@@ -997,6 +999,141 @@ def cmd_qa(args):
         )
 
 
+def cmd_outreach(args):
+    """Outreach command: generate a draft email for a manually-found contact."""
+
+    # ── outreach --job <job_id> --linkedin <url> --email <addr> ────────
+    if args.job and args.linkedin and args.email:
+        console.print(
+            Panel(
+                f"[bold blue]Scout Outreach: Compose + Save Gmail Draft[/bold blue]\n"
+                f"Job ID:  [cyan]{args.job}[/cyan]\n"
+                f"LinkedIn: [cyan]{args.linkedin}[/cyan]\n"
+                f"Email:    [cyan]{args.email}[/cyan]",
+                title="[bold]Outreach[/bold]",
+                expand=False,
+            )
+        )
+
+        with console.status("[bold green]Scraping profile, composing email, saving Gmail draft...[/bold green]"):
+            result = asyncio.run(process_contact(
+                job_id=args.job,
+                linkedin_url=args.linkedin,
+                email=args.email,
+            ))
+
+        if result["success"]:
+            console.print(f"\n[bold green][PASS] Done![/bold green]")
+            console.print(f"Contact: [bold]{result['contact_name']}[/bold] <{args.email}>")
+            console.print(f"Gmail Draft ID: [cyan]{result['gmail_draft_id']}[/cyan]")
+            console.print("\n[dim]Open Gmail Drafts -> review -> hit Send.[/dim]")
+        else:
+            console.print(f"\n[bold red][FAIL] Outreach failed![/bold red]")
+            console.print(f"Error: [red]{result['error']}[/red]")
+        return
+
+    # ── outreach --review ──────────────────────────────────────────────────
+    if args.review:
+        from python.db.client import get_outreach_drafts
+        drafts = get_outreach_drafts()
+        if not drafts:
+            console.print("[yellow]No outreach drafts found.[/yellow]")
+            return
+
+        from rich.table import Table
+        table = Table(title="Outreach Drafts (review in Gmail -> Send)")
+        table.add_column("Job ID (short)", style="dim")
+        table.add_column("Company")
+        table.add_column("Contact")
+        table.add_column("Email")
+        table.add_column("Gmail Draft ID", style="cyan")
+        table.add_column("Status")
+
+        for d in drafts:
+            table.add_row(
+                str(d["job_id"])[-8:],
+                d["company"],
+                d["contact_name"] or "-",
+                d["contact_email"] or "-",
+                d["gmail_draft_id"] or "-",
+                d["status"],
+            )
+        console.print(table)
+        return
+
+    # ── outreach --mark <job_id> --status <status> ─────────────────────────
+    if args.mark:
+        from python.db.client import get_connection
+        from datetime import datetime
+        conn = get_connection()
+        cur = conn.cursor()
+        now = datetime.utcnow().isoformat()
+        cur.execute(
+            "UPDATE outreach SET status = ?, sent_at = ? WHERE job_id LIKE ?",
+            (args.status, now if args.status == "sent" else None, f"%{args.mark}%"),
+        )
+        updated = cur.rowcount
+        conn.commit()
+        conn.close()
+        if updated:
+            console.print(f"[green]Marked outreach for job {args.mark} as '{args.status}'.[/green]")
+        else:
+            console.print(f"[red]No outreach record found for job ID {args.mark}.[/red]")
+        return
+
+    # ── Default: prep scored jobs (all, or specific --job) ──
+    from rich.table import Table as RichTable
+    job_arg = getattr(args, 'job', None)
+    
+    # If the user passed --linkedin or --email but not ALL THREE required for processing
+    if args.linkedin or args.email:
+        console.print("[bold red]Error: To process a contact, you must provide --job, --linkedin, AND --email together.[/bold red]")
+        return
+        
+    panel_msg = (
+        f"[bold blue]Scout Outreach Prep[/bold blue]\n"
+        f"{'Single job: ' + job_arg if job_arg else 'All scored jobs (>= 3.5) without an outreach record'}"
+    )
+    console.print(Panel(panel_msg, expand=False))
+
+    with console.status("[bold green]Extracting JD signals...[/bold green]"):
+        metrics = asyncio.run(prep_outreach(job_id=job_arg))
+
+    if not metrics["jobs"]:
+        console.print("[yellow]No jobs found needing outreach prep.[/yellow]")
+        console.print("[dim]All scored jobs may already have an outreach record. Run 'scout outreach --review' to see them.[/dim]")
+        return
+
+    table = RichTable(title=f"Outreach Prep Complete — {metrics['prepped']}/{metrics['attempted']} jobs prepped")
+    table.add_column("Job ID (short)", style="dim")
+    table.add_column("Company", style="bold")
+    table.add_column("Role")
+    table.add_column("Team")
+    table.add_column("Find someone like...", style="cyan")
+    table.add_column("Domain", style="dim")
+
+    for j in metrics["jobs"]:
+        table.add_row(
+            j["job_id"][-8:],
+            j["company"],
+            j["title"],
+            j["team_name"],
+            ", ".join(j["find_someone_like"]),
+            j["domain"],
+        )
+    console.print(table)
+    console.print("\n[bold]Next step:[/bold] Go to LinkedIn, find the right person, get their email via ContactOut.")
+    console.print("[bold]Then run:[/bold] scout outreach --job <job_id> --linkedin <url> --email <addr>")
+
+    if metrics["errors"]:
+        console.print(f"\n[red]{len(metrics['errors'])} errors:[/red]")
+        for err in metrics["errors"]:
+            console.print(f"  [red]- {err}[/red]")
+
+
+
+
+
 def main():
     parser = argparse.ArgumentParser(description="Scout: Auto-Applier CLI Orchestrator")
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
@@ -1192,6 +1329,51 @@ def main():
         help="Decrease line-height by this amount for the specified job (per-render)",
     )
 
+    # 13. Outreach subcommand
+    parser_outreach = subparsers.add_parser(
+        "outreach", help="Draft personalized outreach emails via Gmail"
+    )
+    parser_outreach.add_argument(
+        "--job",
+        type=str,
+        default=None,
+        metavar="JOB_ID",
+        help="Job ID. Used alone to prep a job, or with --linkedin and --email to process a contact.",
+    )
+    parser_outreach.add_argument(
+        "--linkedin",
+        type=str,
+        default=None,
+        metavar="URL",
+        help="Contact's LinkedIn profile URL (e.g. https://linkedin.com/in/sarahchen)",
+    )
+    parser_outreach.add_argument(
+        "--email",
+        type=str,
+        default=None,
+        metavar="ADDR",
+        help="Contact's email address (from ContactOut or similar)",
+    )
+    parser_outreach.add_argument(
+        "--review",
+        action="store_true",
+        help="List all saved outreach drafts",
+    )
+    parser_outreach.add_argument(
+        "--mark",
+        type=str,
+        default=None,
+        metavar="JOB_ID",
+        help="Job ID to update outreach status for",
+    )
+    parser_outreach.add_argument(
+        "--status",
+        type=str,
+        default="sent",
+        choices=["sent", "replied", "pending"],
+        help="Status to set when using --mark (default: sent)",
+    )
+
     # Parse arguments
     args = parser.parse_args()
 
@@ -1219,6 +1401,8 @@ def main():
         cmd_apply(args)
     elif args.command == "qa":
         cmd_qa(args)
+    elif args.command == "outreach":
+        cmd_outreach(args)
     else:
         parser.print_help()
 

@@ -1,9 +1,8 @@
-import asyncio
 import os
 from python.db.client import get_connection, save_job, get_job, get_unscored_jobs, save_score, save_resume_version, save_application, get_ready_applications, get_pipeline_status
 from python.db.models import Job, Score, ResumeVersion, Application
 
-async def test_sqlite_db():
+def test_sqlite_db():
     print("====================================================")
     print("Testing local SQLite DB client and Pydantic integration")
     print("====================================================")
@@ -119,5 +118,4 @@ async def test_sqlite_db():
     print("[SUCCESS] Cleanup finished! Local SQLite DB is completely functional.")
     print("====================================================")
 
-if __name__ == "__main__":
-    asyncio.run(test_sqlite_db())
+

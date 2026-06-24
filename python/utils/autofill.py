@@ -117,7 +117,43 @@ async def _smart_fill_element(page: Page, element, value: str) -> bool:
             return False
 
         # --- Skip non-fillable types ---
-        if el_type in ["file", "submit", "button", "hidden", "image", "checkbox", "radio"]:
+        if el_type in ["file", "submit", "button", "hidden", "image", "checkbox"]:
+            return False
+
+        # --- Radio inputs: select matching radio in the group by name/value/label ---
+        if el_type == "radio":
+            try:
+                name = await element.get_attribute("name") or ""
+                val_lower = value.lower()
+                if name:
+                    radios = page.locator(f'input[type="radio"][name="{name}"]')
+                    count = await radios.count()
+                    for i in range(count):
+                        r = radios.nth(i)
+                        if not await r.is_visible():
+                            continue
+                        rv = (await r.get_attribute("value") or "").strip().lower()
+                        if rv and (val_lower in rv or rv in val_lower):
+                            await r.click()
+                            return True
+                        al = (await r.get_attribute("aria-label") or "").strip().lower()
+                        if al and (val_lower in al or al in val_lower):
+                            await r.click()
+                            return True
+                        rid = await r.get_attribute("id")
+                        if rid:
+                            lbl = page.locator(f'label:has([for="{rid}"])')
+                            if await lbl.count() > 0 and await lbl.first.is_visible():
+                                text = (await lbl.first.inner_text()).strip().lower()
+                                if val_lower in text or text in val_lower:
+                                    await r.click()
+                                    return True
+                    # If only one visible radio, click it
+                    if count == 1 and await radios.first.is_visible():
+                        await radios.first.click()
+                        return True
+            except Exception:
+                pass
             return False
 
         # --- Standard text / textarea: fill then check for autocomplete suggestions ---
@@ -242,29 +278,105 @@ async def upload_file_by_selector_or_label(
         logger.error(f"File path does not exist for upload: {abs_path}")
         return False
 
-    # 1. Try selectors
+    # 1. Try selectors (iterate matches so we can prefer labeled elements and avoid reusing inputs)
     for sel in selectors:
         try:
             loc = page.locator(sel)
-            if await loc.count() > 0:
-                await loc.first.set_input_files(abs_path)
-                return True
+            count = await loc.count()
+            if count == 0:
+                continue
+            # Prefer elements whose attributes/labels match label_texts
+            for i in range(count):
+                candidate = loc.nth(i)
+                if not await candidate.is_visible():
+                    continue
+                # Skip if already used by previous upload
+                used = (await candidate.get_attribute("data-scout-uploaded"))
+                if used:
+                    continue
+                # If selector is generic (like input[type='file']) and label_texts provided,
+                # check associated label/attributes for hints
+                if sel.strip() in ("input[type='file']", "input[type=\"file\"]") and label_texts:
+                    combined = ""
+                    try:
+                        outer = await candidate.evaluate("el => el.closest('div') ? el.closest('div').innerText.toLowerCase() : ''")
+                        combined = outer
+                    except Exception:
+                        combined = ""
+                    attrs = " ".join(filter(None, [await candidate.get_attribute('id') or '', await candidate.get_attribute('name') or '', await candidate.get_attribute('aria-label') or ''])).lower()
+                    # try associated label
+                    lbl_text = ""
+                    try:
+                        id_val = await candidate.get_attribute('id')
+                        if id_val:
+                            lbl = page.locator(f"label[for='{id_val}']")
+                            if await lbl.count() > 0:
+                                lbl_text = (await lbl.first.inner_text()).lower()
+                    except Exception:
+                        lbl_text = ""
+                    combined = f"{combined} {attrs} {lbl_text}"
+                    matched = False
+                    for kw in label_texts:
+                        if kw.lower() in combined:
+                            matched = True
+                            break
+                    if not matched:
+                        # skip this candidate since it doesn't match any label hints
+                        continue
+
+                # Set files and mark as used
+                try:
+                    await candidate.set_input_files(abs_path)
+                    # mark as used with filename to avoid reusing same element for cover letter
+                    fname = Path(abs_path).name
+                    await candidate.evaluate(f"el => el.setAttribute('data-scout-uploaded', '{fname}')")
+                    logger.info(f"Uploaded file '{fname}' using selector '{sel}'")
+                    return True
+                except Exception:
+                    continue
         except Exception:
             pass
 
-    # 2. Try file inputs directly
+    # 2. Try file inputs directly (inspect each and prefer ones matching label_texts; skip already-used inputs)
     try:
         inputs = page.locator('input[type="file"]')
         count = await inputs.count()
         for i in range(count):
             inp = inputs.nth(i)
+            if not await inp.is_visible():
+                continue
+            used = (await inp.get_attribute("data-scout-uploaded"))
+            if used:
+                continue
             id_val = (await inp.get_attribute("id") or "").lower()
             name = (await inp.get_attribute("name") or "").lower()
+            aria = (await inp.get_attribute("aria-label") or "").lower()
+            # check associated label text
+            label_text = ""
+            try:
+                idv = await inp.get_attribute('id')
+                if idv:
+                    lbl = page.locator(f"label[for='{idv}']")
+                    if await lbl.count() > 0:
+                        label_text = (await lbl.first.inner_text()).lower()
+            except Exception:
+                label_text = ""
+
+            combined = f"{id_val} {name} {aria} {label_text}"
+            matched = False
             for label in label_texts:
-                lbl = label.lower()
-                if lbl in id_val or lbl in name:
+                if label.lower() in combined:
+                    matched = True
+                    break
+            if matched or not label_texts:
+                try:
                     await inp.set_input_files(abs_path)
+                    fname = Path(abs_path).name
+                    await inp.evaluate(f"el => el.setAttribute('data-scout-uploaded', '{fname}')")
+                    logger.info(f"Uploaded file '{fname}' via file input selection (matched labels={label_texts})")
                     return True
+                except Exception:
+                    continue
     except Exception:
         pass
 
@@ -278,8 +390,15 @@ async def upload_file_by_selector_or_label(
                 for_id = await loc.get_attribute("for")
                 if for_id:
                     file_input = page.locator(f"#{for_id}")
-                    await file_input.set_input_files(abs_path)
-                    return True
+                    if await file_input.count() > 0:
+                        try:
+                            await file_input.first.set_input_files(abs_path)
+                            fname = Path(abs_path).name
+                            await file_input.first.evaluate(f"el => el.setAttribute('data-scout-uploaded', '{fname}')")
+                            logger.info(f"Uploaded file '{fname}' via label match for '{label}'")
+                            return True
+                        except Exception:
+                            continue
         except Exception:
             pass
 
@@ -676,9 +795,69 @@ async def autofill_ashby(
     )
 
     # Resume Upload
-    uploaded = await upload_file_by_selector_or_label(
-        page, ["input[type='file']"], ["Resume", "CV"], pdf_path
-    )
+    # Some Ashby/UIs present an early "Autofill from resume" prompt. To avoid
+    # uploading into that prompt, manually scan visible file inputs and pick the
+    # one whose nearest label/id/name suggests it's the actual Resume upload.
+    try:
+        file_inputs = page.locator("input[type='file']")
+        candidate = None
+        count = await file_inputs.count()
+        prefer_keywords = ["resume", "cv", "curriculum", "upload resume"]
+        avoid_keywords = ["autofill", "autofill from resume", "paste resume"]
+        for i in range(count):
+            inp = file_inputs.nth(i)
+            if not await inp.is_visible():
+                continue
+            # Skip inputs inside autofill prompt containers
+            try:
+                outer_text = await inp.evaluate("el => el.closest('div') ? el.closest('div').innerText.toLowerCase() : ''")
+            except Exception:
+                outer_text = ""
+            if any(a in outer_text for a in avoid_keywords):
+                continue
+
+            # Check attributes and associated label
+            attrs = " ".join(filter(None, [await inp.get_attribute('id') or '', await inp.get_attribute('name') or '', await inp.get_attribute('aria-label') or ''])).lower()
+            label_text = ""
+            try:
+                id_val = await inp.get_attribute('id')
+                if id_val:
+                    lbl = page.locator(f"label[for='{id_val}']")
+                    if await lbl.count() > 0:
+                        label_text = (await lbl.first.inner_text()).lower()
+            except Exception:
+                label_text = ""
+
+            combined = f"{outer_text} {attrs} {label_text}"
+            logger.debug(f"File input candidate combined context: {combined}")
+            if any(k in combined for k in prefer_keywords):
+                candidate = inp
+                break
+
+        if candidate:
+            # Use the chosen input
+            await candidate.set_input_files(str(Path(pdf_path).resolve()))
+            try:
+                fname = Path(pdf_path).name
+                await candidate.evaluate(f"el => el.setAttribute('data-scout-uploaded', '{fname}')")
+            except Exception:
+                pass
+            uploaded = True
+        else:
+            # Fallback to helper
+            uploaded = await upload_file_by_selector_or_label(
+                page,
+                [
+                    "input[id*='resume']",
+                    "input[name*='resume']",
+                    "input[aria-label*='resume']",
+                    "input[type='file'][accept*='pdf']",
+                ],
+                ["Resume", "CV"],
+                pdf_path,
+            )
+    except Exception:
+        uploaded = False
     if uploaded:
         logger.info("Successfully uploaded resume PDF to Ashby form.")
 

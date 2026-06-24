@@ -782,3 +782,210 @@ async def import_pipeline(file_path: Optional[str] = None, url: Optional[str] = 
         
     logger.info(f"Import Pipeline Complete. Imported: {metrics['imported']}, Scored: {metrics['scored']}, Packaged: {metrics['packaged']}.")
     return metrics
+async def prep_outreach(job_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Step 0 of outreach: Extract team intel from JD and create a 'pending' outreach
+    record for each scored job. No scraping, no email — just populates the DB so
+    you know who to look for on LinkedIn.
+
+    Usage:
+        scout outreach              → preps all jobs scored >= 3.5 without an outreach record
+        scout outreach --job <id>   → preps a single specific job
+    """
+    from python.db.client import get_jobs_without_outreach, save_outreach, get_job
+    from python.outreach.extractor import JDExtractor
+    from python.db.models import Outreach
+
+    metrics = {
+        "attempted": 0,
+        "prepped": 0,
+        "errors": [],
+        "jobs": [],
+    }
+
+    # Collect target jobs
+    if job_id:
+        job = get_job(job_id)
+        jobs = [job] if job else []
+    else:
+        jobs = get_jobs_without_outreach(min_score=3.5)
+
+    metrics["attempted"] = len(jobs)
+
+    if not jobs:
+        logger.info("No jobs found needing outreach prep.")
+        return metrics
+
+    extractor = JDExtractor()
+
+    for job in jobs:
+        try:
+            logger.info(f"Prepping outreach for {job.company} — {job.title}...")
+
+            extracted = await extractor.extract(job.raw_jd, company=job.company)
+
+            domain = extracted.get("company_domain") or job.company.lower().replace(" ", "") + ".com"
+            team_name = extracted.get("team_name", "Engineering")
+            # Store what kind of person to look for as a JSON string in company_domain for now
+            # Actually store manager_title_keywords joined into team_name context
+            manager_keywords = extracted.get("manager_title_keywords", [])
+
+            out_record = Outreach(
+                job_id=job.id,
+                company_domain=domain,
+                team_name=team_name,
+                # Reuse contact_title as a hint for what role to find
+                contact_title=", ".join(manager_keywords),
+                status="pending",
+            )
+            save_outreach(out_record)
+
+            metrics["prepped"] += 1
+            metrics["jobs"].append({
+                "job_id": str(job.id),
+                "company": job.company,
+                "title": job.title,
+                "team_name": team_name,
+                "find_someone_like": manager_keywords,
+                "domain": domain,
+            })
+            logger.info(f"  -> Team: {team_name} | Look for: {manager_keywords}")
+
+            # Small delay to avoid hammering Gemini
+            await asyncio.sleep(1.0)
+
+        except Exception as ex:
+            logger.error(f"Error prepping outreach for {job.id}: {ex}")
+            metrics["errors"].append(f"{job.company}: {str(ex)}")
+
+    return metrics
+
+async def process_contact(
+
+    job_id: str,
+    linkedin_url: str,
+    email: str,
+) -> Dict[str, Any]:
+    """
+    Phase 5 orchestrator: You found the contact manually, now Scout does the rest.
+
+    Flow:
+      1. Fetch job + existing outreach record from DB
+      2. Scrape their full LinkedIn profile (datadoping actor)
+      3. Re-extract key signals from the JD (or use existing outreach record)
+      4. Compose email using profile headline/about/experience + JD context
+      5. Save as Gmail draft (you review + hit Send in Gmail)
+      6. Persist everything to outreach table
+
+    Args:
+        job_id:       UUID of the job in the DB
+        linkedin_url: Contact's LinkedIn profile URL (e.g. https://linkedin.com/in/sarahchen)
+        email:        Contact's email obtained via ContactOut or similar
+    """
+    from python.db.client import get_job, save_outreach, get_outreach_by_job_id
+    from python.outreach.profile_scraper import scrape_profile
+    from python.outreach.extractor import JDExtractor
+    from python.outreach.composer import EmailComposer
+    from python.outreach.sender import save_as_draft
+    from python.db.models import Outreach
+
+    result: Dict[str, Any] = {
+        "success": False,
+        "job_id": job_id,
+        "contact_name": None,
+        "gmail_draft_id": None,
+        "error": None,
+    }
+
+    # ── 1. Fetch job ─────────────────────────────────────────────────────────
+    job = get_job(job_id)
+    if not job:
+        result["error"] = f"Job ID {job_id} not found in database."
+        logger.error(result["error"])
+        return result
+
+    logger.info(f"Processing contact for {job.company} | {email} | {linkedin_url}")
+
+    # ── 2. Scrape LinkedIn profile ────────────────────────────────────────────
+    logger.info(f"Scraping LinkedIn profile: {linkedin_url}")
+    profile = await scrape_profile(linkedin_url)
+    if not profile:
+        result["error"] = f"Failed to scrape LinkedIn profile: {linkedin_url}"
+        logger.error(result["error"])
+        return result
+
+    # Extract the fields we need from the datadoping profile response
+    contact_name = profile.get("fullname") or profile.get("firstName", "") + " " + profile.get("lastName", "")
+    contact_name = contact_name.strip()
+    headline = profile.get("headline", "")
+    about = profile.get("about", "")
+
+    experience_list = profile.get("experience", [])
+    current_exp = experience_list[0] if experience_list else {}
+    contact_title = current_exp.get("title", "")
+    recent_experience = current_exp.get("description", "")
+
+    logger.info(f"Got profile: {contact_name} — {contact_title}")
+    result["contact_name"] = contact_name
+
+    # ── 3. Extract JD signals ─────────────────────────────────────────────────
+    # Try existing outreach record first (saves an API call if already extracted)
+    existing = get_outreach_by_job_id(job_id)
+    team_name = existing.team_name if existing and existing.team_name else None
+
+    extractor = JDExtractor()
+    extracted = await extractor.extract(job.raw_jd, company=job.company)
+
+    team_name = team_name or extracted.get("team_name", "Engineering")
+    key_signals = extracted.get("key_signals", [])
+    relevant_project = extracted.get("relevant_project", "Orbit")
+
+    # ── 4. Compose email ──────────────────────────────────────────────────────
+    composer = EmailComposer()
+    email_content = await composer.compose(
+        contact_name=contact_name,
+        contact_title=contact_title,
+        headline=headline,
+        about=about,
+        recent_experience=recent_experience,
+        company=job.company,
+        job_title=job.title,
+        team_name=team_name,
+        key_signals=key_signals,
+        relevant_project=relevant_project,
+    )
+
+    subject = email_content.get("subject", "")
+    body = email_content.get("body", "")
+    logger.info(f"Email composed. Subject: {subject}")
+
+    # ── 5. Save Gmail draft ───────────────────────────────────────────────────
+    draft_id = await save_as_draft(to=email, subject=subject, body=body)
+    result["gmail_draft_id"] = draft_id
+    logger.info(f"Gmail draft saved: {draft_id}")
+
+    # ── 6. Persist to DB ──────────────────────────────────────────────────────
+    domain = extracted.get("company_domain") or job.company.lower().replace(" ", "") + ".com"
+
+    # Upsert: if a record exists (e.g. from a prior failed run) update it,
+    # otherwise create a fresh one.
+    out_record = existing or Outreach(job_id=job.id)
+
+    out_record.contact_name = contact_name
+    out_record.contact_title = contact_title
+    out_record.contact_email = email
+    out_record.contact_linkedin = linkedin_url
+    out_record.contact_headline = headline
+    out_record.contact_about = about
+    out_record.company_domain = domain
+    out_record.team_name = team_name
+    out_record.email_subject = subject
+    out_record.email_body = body
+    out_record.gmail_draft_id = draft_id
+    out_record.status = "draft_saved"
+
+    save_outreach(out_record)
+
+    logger.info(f"Done. Draft saved for {contact_name} at {job.company}")
+    result["success"] = True
+    return result

@@ -1,6 +1,21 @@
 import re
 from typing import List
 from python.db.models import Job
+import json
+from pathlib import Path
+
+
+# Load candidate preferences (willing_to_relocate) once at import time
+_WILLING_TO_RELOCATE = False
+try:
+    resume_path = Path("data/resume.json")
+    if not resume_path.exists():
+        resume_path = Path(__file__).resolve().parent.parent / "data" / "resume.json"
+    if resume_path.exists():
+        data = json.loads(resume_path.read_text(encoding="utf-8"))
+        _WILLING_TO_RELOCATE = bool(data.get("willing_to_relocate", False))
+except Exception:
+    _WILLING_TO_RELOCATE = False
 
 # Roles to accept
 ALLOWED_ROLES = [
@@ -51,6 +66,9 @@ def passes_job_filter(job: Job) -> bool:
             
     if not role_match:
         return False
+    # If the candidate is willing to relocate anywhere, accept based on role only
+    if _WILLING_TO_RELOCATE:
+        return True
         
     # 3. Check location (Must be remote, US, or India)
     if job.remote:
