@@ -4,6 +4,7 @@ import markdown
 import subprocess
 import tempfile
 import re
+import json
 from datetime import date
 from pathlib import Path
 
@@ -130,8 +131,33 @@ async def generate_cover_letter_pdf(cover_letter_text: str, job_id: str) -> str:
         ]
         body_html = "\n".join(f"<p>{p}</p>" for p in paragraphs)
 
-        full_html = template_html.replace("{{ date }}", today).replace(
-            "{{ body }}", body_html
+        # Load resume data to get contact details
+        resume_data = {}
+        try:
+            resume_json_path = Path("data/resume.json")
+            if not resume_json_path.exists():
+                resume_json_path = Path(__file__).resolve().parent.parent.parent / "data" / "resume.json"
+            if resume_json_path.exists():
+                with open(resume_json_path, "r", encoding="utf-8") as f:
+                    resume_data = json.load(f)
+        except Exception as e:
+            logger.error(f"Could not load resume.json for cover letter template: {e}")
+
+        name = resume_data.get("name", "Candidate Name")
+        contact = resume_data.get("contact", {})
+        phone = contact.get("phone", "")
+        email = contact.get("email", "")
+        linkedin = contact.get("linkedin", "")
+        github = contact.get("github", "")
+
+        full_html = (template_html
+            .replace("{{ date }}", today)
+            .replace("{{ body }}", body_html)
+            .replace("{{ name }}", name)
+            .replace("{{ phone }}", phone)
+            .replace("{{ email }}", email)
+            .replace("{{ linkedin }}", linkedin)
+            .replace("{{ github }}", github)
         )
 
         output_dir = Path("output")

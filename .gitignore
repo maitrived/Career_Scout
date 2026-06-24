@@ -39,3 +39,11 @@ data/resume.md
 
 data/qa_bank.json
 data/star_bank.json
+
+# Exclude personal info, DBs, and scratch
+*.db
+*.pdf
+*.log
+scratch/
+stripe.html
+stripe_rendered.html

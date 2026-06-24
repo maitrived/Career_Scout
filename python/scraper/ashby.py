@@ -103,7 +103,7 @@ class AshbyScraper(BaseScraper):
             is_remote = True
 
         # Extract posted date (Ashby uses publishedAt or updatedAt)
-        posted_at_val = datetime.utcnow()
+        posted_at_val = datetime.now()  # local time fallback
         published_at_str = raw.get("publishedAt")
         if published_at_str:
             try:
@@ -120,6 +120,6 @@ class AshbyScraper(BaseScraper):
             remote=is_remote,
             url=url,
             raw_jd=clean_jd,
-            scraped_at=datetime.utcnow(),
+            scraped_at=datetime.now(),  # local machine time
             posted_at=posted_at_val
         )

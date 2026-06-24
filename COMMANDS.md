@@ -6,6 +6,12 @@ This document contains all the commands you can run using the `scout.bat` CLI.
 **Command:** `.\scout.bat pipeline --company <slug>`
 **Description:** Runs the entire end-to-end pipeline (Scrape → Score → Tailor → Package). If you provide a company slug (e.g. `retool`), it isolates the entire process to *only* that company to save API quota.
 
+**Command:** `.\scout.bat pipeline --file <path> [--skip-scoring]`
+**Description:** Imports jobs from an Excel or CSV file containing a `url` column, scrapes them directly, and runs them through the rest of the pipeline. Use `--skip-scoring` to bypass the scoring phase and automatically advance them to tailoring.
+
+**Command:** `.\scout.bat pipeline --url <url> [--skip-scoring]`
+**Description:** Directly imports and scrapes a single job from the provided URL, then runs it through the rest of the pipeline. Use `--skip-scoring` to bypass the scoring phase.
+
 **Command:** `.\scout.bat process --job <id>`
 **Description:** Runs the pipeline for a single specific job (Score → Tailor → Package). It only proceeds to tailoring and packaging if the job scores >= 3.5. Ideal for evaluating a single JD without scraping.
 
@@ -72,6 +78,12 @@ This document contains all the commands you can run using the `scout.bat` CLI.
 
 **Command:** `.\scout.bat apply --job <id>`
 **Description:** Autofills the application form for a specific job ID, regardless of its status.
+
+**Command:** `.\scout.bat apply --scraped-on today`
+**Description:** Only applies to job packages that were scraped **today**. Useful for running a focused apply session after your daily scrape-and-tailor run.
+
+**Command:** `.\scout.bat apply --scraped-on 06-18-2026`
+**Description:** Only applies to job packages that were scraped on the given date (`MM-DD-YYYY` format). Lets you revisit any specific scraping day and apply to its ready packages without touching other jobs.
 
 ## 8. Custom Q&A Bank Management
 **Command:** `.\scout.bat qa --list`

@@ -12,10 +12,14 @@ DB_PATH = os.path.join("data", "auto_applier.db")
 def get_connection() -> sqlite3.Connection:
     """Returns a standard sqlite3 connection with Row factory enabled."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     # Enable foreign keys support in SQLite
     conn.execute("PRAGMA foreign_keys = ON;")
+    # WAL mode allows concurrent reads/writes without locking the whole file
+    conn.execute("PRAGMA journal_mode = WAL;")
+    # Wait up to 5s if another writer holds a lock before giving up
+    conn.execute("PRAGMA busy_timeout = 5000;")
     return conn
 
 
@@ -59,6 +63,7 @@ def init_db():
         level_fit REAL NOT NULL,
         growth_signal REAL NOT NULL DEFAULT 0.0,
         culture_signal REAL NOT NULL,
+        sponsorship_signal REAL NOT NULL DEFAULT 3.0,
         rationale TEXT NOT NULL,
         red_flags TEXT NOT NULL, -- JSON string list
         scored_at TEXT NOT NULL,
@@ -72,6 +77,10 @@ def init_db():
     if "growth_signal" not in cols:
         cursor.execute(
             "ALTER TABLE scores ADD COLUMN growth_signal REAL NOT NULL DEFAULT 0.0;"
+        )
+    if "sponsorship_signal" not in cols:
+        cursor.execute(
+            "ALTER TABLE scores ADD COLUMN sponsorship_signal REAL NOT NULL DEFAULT 3.0;"
         )
 
     # 3. Resume versions table
@@ -135,7 +144,7 @@ def save_job(job: Job) -> Job:
     if not job.id:
         job.id = uuid.uuid4()
     if not job.scraped_at:
-        job.scraped_at = datetime.utcnow()
+        job.scraped_at = datetime.now()  # local machine time
 
     scraped_at_str = (
         job.scraped_at.isoformat()
@@ -152,15 +161,7 @@ def save_job(job: Job) -> Job:
         """
     INSERT INTO jobs (id, source, external_id, company, title, location, remote, url, raw_jd, scraped_at, posted_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(source, external_id) DO UPDATE SET
-        company=excluded.company,
-        title=excluded.title,
-        location=excluded.location,
-        remote=excluded.remote,
-        url=excluded.url,
-        raw_jd=excluded.raw_jd,
-        scraped_at=excluded.scraped_at,
-        posted_at=excluded.posted_at
+    ON CONFLICT(source, external_id) DO NOTHING
     RETURNING id;
     """,
         (
@@ -181,6 +182,14 @@ def save_job(job: Job) -> Job:
     row = cursor.fetchone()
     if row:
         job.id = uuid.UUID(row["id"])
+    else:
+        cursor.execute(
+            "SELECT id FROM jobs WHERE source = ? AND external_id = ?",
+            (job.source, job.external_id)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            job.id = uuid.UUID(existing["id"])
 
     conn.commit()
     conn.close()
@@ -306,8 +315,8 @@ def save_score(score: Score) -> Score:
 
     cursor.execute(
         """
-    INSERT INTO scores (id, job_id, embedding_similarity, overall_score, tech_fit, level_fit, growth_signal, culture_signal, rationale, red_flags, scored_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scores (id, job_id, embedding_similarity, overall_score, tech_fit, level_fit, growth_signal, culture_signal, sponsorship_signal, rationale, red_flags, scored_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
         embedding_similarity=excluded.embedding_similarity,
         overall_score=excluded.overall_score,
@@ -315,6 +324,7 @@ def save_score(score: Score) -> Score:
         level_fit=excluded.level_fit,
         growth_signal=excluded.growth_signal,
         culture_signal=excluded.culture_signal,
+        sponsorship_signal=excluded.sponsorship_signal,
         rationale=excluded.rationale,
         red_flags=excluded.red_flags,
         scored_at=excluded.scored_at
@@ -328,6 +338,7 @@ def save_score(score: Score) -> Score:
             score.level_fit,
             score.growth_signal,
             score.culture_signal,
+            getattr(score, "sponsorship_signal", 3.0),
             score.rationale,
             json.dumps(score.red_flags),
             scored_at_str,
@@ -515,7 +526,60 @@ def get_ready_applications() -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def get_ready_applications_by_date(scraped_date: str) -> list[dict[str, Any]]:
+    """Lists 'ready' applications where the job was scraped on a specific date.
+
+    Args:
+        scraped_date: Either 'today' or a date string in MM-DD-YYYY format (e.g. '06-18-2026').
+
+    Returns:
+        A list of dicts with job details, score, and pdf_path.
+    """
+    from datetime import date as _date, datetime as _datetime
+
+    if scraped_date.lower() == "today":
+        target_date = _date.today().isoformat()  # YYYY-MM-DD for DB LIKE match
+    else:
+        # Accept MM-DD-YYYY format
+        try:
+            parsed = _datetime.strptime(scraped_date, "%m-%d-%Y")
+            target_date = parsed.strftime("%Y-%m-%d")
+        except ValueError:
+            raise ValueError(
+                f"Invalid date '{scraped_date}'. Use 'today' or MM-DD-YYYY format (e.g. '06-18-2026')."
+            )
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+    SELECT
+        a.id as app_id,
+        j.id as job_id,
+        j.company,
+        j.title,
+        j.url,
+        j.scraped_at,
+        s.overall_score,
+        rv.pdf_path,
+        rv.cover_letter
+    FROM applications a
+    JOIN jobs j ON a.job_id = j.id
+    JOIN scores s ON j.id = s.job_id
+    JOIN resume_versions rv ON a.resume_version_id = rv.id
+    WHERE a.status = 'ready'
+      AND j.scraped_at LIKE ?
+    ORDER BY s.overall_score DESC
+    """,
+        (f"{target_date}%",),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
 def get_jobs_needing_tailor() -> list[dict]:
+
     """Returns all scored jobs (>= 3.5) that don't yet have a tailored resume version."""
     conn = get_connection()
     cursor = conn.cursor()

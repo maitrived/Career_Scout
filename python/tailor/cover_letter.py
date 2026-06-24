@@ -75,7 +75,7 @@ class CoverLetterGenerator:
     def generate(self, job: Job) -> str:
         """Generates a technical, direct cover letter for the target job."""
         prompt = f"""
-You are writing a professional, technical, and direct cover letter for candidate Parva Jignesh Chaudhari.
+You are writing a professional, technical, and direct cover letter for the candidate based on their resume.
 
 ---
 ### CANDIDATE RESUME
@@ -91,11 +91,9 @@ You are writing a professional, technical, and direct cover letter for candidate
 ### COVER LETTER RULES
 1. **Length**: Under 250 words total.
 2. **Structure**: Exactly three paragraphs, formatted as plain text without any markdown or formatting.
-   - **Paragraph 1 (Role & Context)**: Explain why you are applying to this specific role and company. Mention a concrete technical problem they are solving. Do NOT use generic openings like "I am excited to apply for..." or "I am writing to express my interest...". Open directly and professionally (e.g. "I am applying for the Software Engineer role at Vercel to work on identity management systems...").
-   - **Paragraph 2 (Relevant Experience)**: Focus on the single most relevant engineering proof point in your history:
-     - Emphasize **Orbit** (multi-tenant supply chain platform, GCP OIDC service-to-service auth, headless Odoo 18, Supabase RLS) for supply chain, logistics, microservices, and platform/infrastructure roles.
-     - Emphasize **MindHive** (open-source AI personal knowledge base, FastAPI, Supabase, pgvector semantic search, Gemini embeddings, NVIDIA NIM, Queen Bee agent response optimizations) for AI, ML, search, and data pipeline roles.
-   - **Paragraph 3 (One-Sentence Close)**: Write a brief close proposing a technical call. Do NOT write fluff like "I look forward to hearing from you" or "Thank you for your time and consideration." Make it direct, e.g. "I am available to discuss my experience with microservices and auth integrations at your convenience."
+   - **Paragraph 1 (Role & Context)**: Explain why you are applying to this specific role and company. Mention a concrete technical problem they are solving. Do NOT use generic openings like "I am excited to apply for..." or "I am writing to express my interest...". Open directly and professionally.
+   - **Paragraph 2 (Relevant Experience)**: Focus on the single most relevant engineering proof point in your history based on the job description. Extract the most relevant project or work experience from the provided resume.
+   - **Paragraph 3 (One-Sentence Close)**: Write a brief close proposing a technical call. Do NOT write fluff like "I look forward to hearing from you" or "Thank you for your time and consideration." Make it direct, e.g. "I am available to discuss my experience with these technologies at your convenience."
 3. **Tone**: Direct, technical, and confident. Avoid passive voice or emotional fluff (no "passion", "excitement", "perfection").
 4. **Output**: Return ONLY the cover letter text, with no headers, footers, subject lines, greeting templates, or markdown.
 """
@@ -114,6 +112,6 @@ You are writing a professional, technical, and direct cover letter for candidate
         except Exception as ex:
             logger.error(f"Error calling cover letter generator: {ex}")
             # Fallback cover letter
-            return f"Parva Jignesh Chaudhari\n\nI am applying for the {job.title} role at {job.company}. " \
-                   f"My background is in Python, FastAPI, and GCP, where I recently architected a secure supply chain microservices platform. " \
-                   f"I am available to discuss how my backend and infrastructure skills align with your engineering needs."
+            return f"I am applying for the {job.title} role at {job.company}. " \
+                   f"My background matches your engineering needs as described in the job posting. " \
+                   f"I am available to discuss how my technical skills align with your open position."

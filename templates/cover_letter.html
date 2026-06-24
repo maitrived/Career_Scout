@@ -107,17 +107,15 @@
 
 <body>
     <!-- Header -->
-    <div id="cl-name">Parva Jignesh Chaudhari</div>
+    <div id="cl-name">{{ name }}</div>
     <div id="cl-contact">
-        <span class="contact-item">(602)-565-7517</span>
+        <span class="contact-item">{{ phone }}</span>
         <span class="sep">|</span>
-        <span class="contact-item">parvachaudhari@gmail.com</span>
+        <span class="contact-item">{{ email }}</span>
         <span class="sep">|</span>
-        <a class="contact-item" href="https://www.linkedin.com/in/parvachaudhari/">LinkedIn</a>
+        <a class="contact-item" href="{{ linkedin }}">LinkedIn</a>
         <span class="sep">|</span>
-        <a class="contact-item" href="https://github.com/ParvaChaudhari">GitHub</a>
-        <span class="sep">|</span>
-        <a class="contact-item" href="https://parvachaudhari.vercel.app/">Portfolio</a>
+        <a class="contact-item" href="{{ github }}">GitHub</a>
     </div>
 
     <hr id="cl-divider">
@@ -135,7 +133,7 @@
 
     <!-- Closing -->
     <div id="cl-closing">Best regards,</div>
-    <div id="cl-signature">Parva Chaudhari</div>
+    <div id="cl-signature">{{ name }}</div>
 </body>
 
 </html>

@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 from typing import Optional, List
 from pathlib import Path
@@ -24,7 +25,64 @@ from python.config import GEMINI_API_KEY, NIM_API_KEY, LLM_MODEL
 
 logger = logging.getLogger(__name__)
 
-# Define Pydantic schema for structured Gemini output
+# ─── Sponsorship Pre-Scanner ──────────────────────────────────────────────────
+
+# Phrases that explicitly state they will NOT sponsor
+_NO_SPONSOR_PATTERNS = re.compile(
+    r"("
+    r"will\s+not\s+sponsor"
+    r"|unable\s+to\s+(provide|offer|support)\s+(visa\s+)?sponsor"
+    r"|does?\s+not\s+sponsor"
+    r"|cannot\s+sponsor"
+    r"|no\s+(visa\s+)?sponsor"
+    r"|not\s+eligible\s+for\s+sponsor"
+    r"|sponsorship\s+(is\s+)?not\s+(available|offered|provided)"
+    r"|we\s+do\s+not\s+sponsor"
+    r"|authorization\s+to\s+work\s+in\s+the\s+u\.?s\.?\s+without\s+sponsor"
+    r"|must\s+be\s+(authorized|eligible)\s+to\s+work\s+without\s+sponsor"
+    r"|candidates?\s+requiring\s+sponsor"
+    r"|require\s+work\s+authorization\s+without\s+sponsorship"
+    r")",
+    re.IGNORECASE,
+)
+
+# Phrases that explicitly state they WILL sponsor
+_WILL_SPONSOR_PATTERNS = re.compile(
+    r"("
+    r"will\s+sponsor"
+    r"|offer(s|ing)?\s+(visa\s+)?sponsor"
+    r"|provide(s|ing)?\s+(visa\s+)?sponsor"
+    r"|support(s|ing)?\s+(visa\s+)?sponsor"
+    r"|open\s+to\s+sponsor"
+    r"|h[\-\s]?1b\s+sponsor"
+    r"|visa\s+sponsor(ship)?\s+(is\s+)?(available|offered|provided|considered|possible)"
+    r"|sponsor(s|ing)?\s+(work\s+)?(visa|visas|authorization)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _score_sponsorship(raw_jd: str) -> tuple[float, str]:
+    """
+    Fast regex scan of the job description to determine visa sponsorship stance.
+
+    Returns:
+        (score, label) where score is 1.0 / 3.0 / 5.0 and label is a short string.
+        - 1.0  -> explicit no-sponsor (hard reject signal)
+        - 3.0  -> not mentioned (neutral -- assume possible)
+        - 5.0  -> explicitly offers sponsorship
+    """
+    text = raw_jd or ""
+    if _NO_SPONSOR_PATTERNS.search(text):
+        return 1.0, "No sponsorship -- explicitly stated"
+    if _WILL_SPONSOR_PATTERNS.search(text):
+        return 5.0, "Sponsorship available -- explicitly stated"
+    return 3.0, "Sponsorship not mentioned -- neutral"
+
+
+# ─── LLM Score Schema ─────────────────────────────────────────────────────────
+
+# Define Pydantic schema for structured LLM output
 class LLMScoreOutput(BaseModel):
     tech_fit: float = Field(
         ..., 
@@ -65,18 +123,11 @@ class LLMScoreOutput(BaseModel):
 
 class JobEvaluator:
     """
-    Evaluator that leverages Gemini 3 Flash to perform a deep rubric-based structured scoring
-    on job descriptions compared against Parva's resume.
+    Evaluator that leverages an LLM to perform a deep rubric-based structured scoring
+    on job descriptions compared against the candidate's resume.
     """
     
     def __init__(self):
-        # Gemini Code (Commented Out)
-        # self.api_key = GEMINI_API_KEY
-        # if not self.api_key:
-        #     raise ValueError("GEMINI_API_KEY not found in environment configurations.")
-        # self.client = genai.Client(api_key=self.api_key)
-        # self.model_name = "gemini-3-flash-preview"
-
         # NVIDIA NIM Code
         self.api_key = NIM_API_KEY
         if not self.api_key:
@@ -107,7 +158,7 @@ class JobEvaluator:
         return response.choices[0].message.content
 
     def _load_resume(self) -> str:
-        """Loads Parva's markdown resume as a source of truth for LLM evaluation."""
+        """Loads the candidate's markdown resume as a source of truth for LLM evaluation."""
         try:
             # Assume run from root workspace
             resume_path = Path("data/resume.md")
@@ -119,7 +170,7 @@ class JobEvaluator:
                 return resume_path.read_text(encoding="utf-8")
             else:
                 logger.warning("data/resume.md not found. Falling back to default profile description.")
-                return "Parva: Python Backend Software Engineer, 2 YOE, GCP, FastAPI, PostgreSQL."
+                return "Maitri: Python/Java Backend Software Engineer, 2 YOE, GCP, FastAPI, PostgreSQL."
         except Exception as ex:
             logger.error(f"Error loading resume context file: {ex}")
             return ""
@@ -128,11 +179,25 @@ class JobEvaluator:
         """
         Runs LLM evaluation on a single job description.
         Computes overall score programmatically based on weighted rubric dimensions.
+
+        Scoring weights:
+          - tech_fit:            30%
+          - level_fit:           22%
+          - growth_signal:       18%
+          - culture_signal:      15%
+          - sponsorship_signal:  15%  <- pre-scan (no extra API call needed)
         """
-        # Formulate prompt
+        # ── Step 1: Fast sponsorship pre-scan (regex, no API call) ─────────────
+        sponsorship_score, sponsorship_label = _score_sponsorship(job.raw_jd or "")
+        logger.info(
+            f"Sponsorship scan for '{job.title}' @ {job.company}: "
+            f"{sponsorship_label} (score={sponsorship_score})"
+        )
+
+        # ── Step 2: Build LLM prompt ───────────────────────────────────────────
         prompt = f"""
-You are an expert technical recruiter analyzing a job posting for candidate Parva.
-Evaluate the following Job Posting against Parva's Resume.
+You are an expert technical recruiter analyzing a job posting for the candidate.
+Evaluate the following Job Posting against the Candidate's Resume.
 
 ---
 ### CANDIDATE RESUME (Source of Truth)
@@ -152,7 +217,7 @@ Evaluate the following Job Posting against Parva's Resume.
 ---
 ### EVALUATION INSTRUCTIONS & CRITERIA
 1. Grade the job on the following four dimensions (1.0 to 5.0 scale):
-   - `tech_fit`: Rate alignment with Parva's stack (Python, FastAPI, PostgreSQL, Supabase, GCP, APIs, JWT/OAuth2). C#/.NET and Docker are secondary but solid. Low score for frontend (React-only) or non-matching backend frameworks (Java/Go/Ruby/PHP/Node).
+   - `tech_fit`: Rate alignment with the candidate's technical stack as defined in their resume. High score for jobs demanding their primary skills. Low score for jobs requiring entirely different frameworks or languages.
    - `level_fit`: Target is ~2 Years of Experience. Rate 5.0 if YOE requirement is 1-3 years. If 5+ YOE is a hard requirement, or the role is a senior/staff/lead, rate <= 2.0.
    - `growth_signal`: Rate learning/growth opportunities in the problem space (AI/ML, supply chain, platforms, data pipelines).
    - `culture_signal`: Rate flexibility. 5.0 for fully remote or Arizona (Scottsdale/Phoenix/Tempe). Low score (1.0-2.0) for strict onsite positions outside of Arizona.
@@ -169,46 +234,46 @@ Evaluate the following Job Posting against Parva's Resume.
 {json.dumps(LLMScoreOutput.model_json_schema(), indent=2)}
 """
 
-        # Gemini Execution (Commented Out)
-        # config = types.GenerateContentConfig(
-        #     response_mime_type="application/json",
-        #     response_schema=LLMScoreOutput,
-        #     thinking_config=types.ThinkingConfig(
-        #         thinking_level="minimal" 
-        #     )
-        # )
-        # try:
-        #     response = self.client.models.generate_content(
-        #         model=self.model_name,
-        #         contents=prompt,
-        #         config=config
-        #     )
-        #     raw_text = response.text
-        #     output = LLMScoreOutput.model_validate_json(raw_text)
-
-        # NVIDIA NIM Execution
+        # ── Step 3: Call LLM ───────────────────────────────────────────────────
         try:
             raw_text = self._create_completion(prompt)
             output = LLMScoreOutput.model_validate_json(raw_text)
             
-            # Calculate overall score programmatically based on rubric weights:
-            # - tech_fit: 35%
-            # - level_fit: 25%
-            # - growth_signal: 20%
-            # - culture_signal: 20%
+            # ── Step 4: Weighted overall score ─────────────────────────────────
+            # tech_fit 30% | level_fit 22% | growth_signal 18%
+            # culture_signal 15% | sponsorship_signal 15%
             overall = (
-                (output.tech_fit * 0.35) + 
-                (output.level_fit * 0.25) + 
-                (output.growth_signal * 0.20) + 
-                (output.culture_signal * 0.20)
+                (output.tech_fit       * 0.30) +
+                (output.level_fit      * 0.22) +
+                (output.growth_signal  * 0.18) +
+                (output.culture_signal * 0.15) +
+                (sponsorship_score     * 0.15)
             )
-            
-            # Round overall score to 2 decimal places
             overall = round(overall, 2)
-            
-            # If red flags exist (other than ["None"]), force overall score down to cap at 3.0 to prevent advancement
-            has_red_flags = len(output.red_flags) > 0 and output.red_flags != ["None"] and output.red_flags != ["none"]
-            if has_red_flags and overall >= 3.5:
+
+            # Build combined red flags list
+            red_flags = list(output.red_flags)
+
+            # ── Step 5: Hard-reject rules ───────────────────────────────────────
+            has_llm_red_flags = (
+                red_flags
+                and red_flags != ["None"]
+                and red_flags != ["none"]
+            )
+
+            # No-sponsor -> hard reject: cap score and add red flag
+            if sponsorship_score == 1.0:
+                if "No visa sponsorship" not in red_flags:
+                    red_flags.append("No visa sponsorship")
+                if overall >= 3.5:
+                    overall = min(overall, 2.5)
+                    logger.info(
+                        f"Score capped to {overall} (no-sponsorship) "
+                        f"for '{job.title}' @ {job.company}"
+                    )
+
+            # Other LLM red flags cap at 3.0
+            elif has_llm_red_flags and overall >= 3.5:
                 overall = 3.0
                 
             return Score(
@@ -219,12 +284,13 @@ Evaluate the following Job Posting against Parva's Resume.
                 level_fit=output.level_fit,
                 growth_signal=output.growth_signal,
                 culture_signal=output.culture_signal,
-                rationale=output.rationale,
-                red_flags=output.red_flags
+                sponsorship_signal=sponsorship_score,
+                rationale=f"[Sponsorship: {sponsorship_label}] {output.rationale}",
+                red_flags=red_flags
             )
             
         except Exception as ex:
-            logger.error(f"Error calling Gemini evaluator for job '{job.title}' ({job.id}): {ex}")
+            logger.error(f"Error calling LLM evaluator for job '{job.title}' ({job.id}): {ex}")
             # Fallback score indicating failure
             return Score(
                 job_id=job.id,
@@ -234,6 +300,7 @@ Evaluate the following Job Posting against Parva's Resume.
                 level_fit=1.0,
                 growth_signal=1.0,
                 culture_signal=1.0,
+                sponsorship_signal=3.0,
                 rationale=f"Evaluation failed due to an error: {str(ex)}",
                 red_flags=["EvaluationError"]
             )

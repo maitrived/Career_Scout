@@ -29,6 +29,7 @@ class Score(BaseModel):
     level_fit: float
     growth_signal: float
     culture_signal: float
+    sponsorship_signal: float = 3.0  # Default: not mentioned (neutral)
     rationale: str
     red_flags: list[str] = Field(default_factory=list)
     scored_at: datetime | None = None

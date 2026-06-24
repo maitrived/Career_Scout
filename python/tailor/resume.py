@@ -31,7 +31,6 @@ class Contact(BaseModel):
     location: str
     linkedin: str
     github: str
-    portfolio: str
 
 class EducationEntry(BaseModel):
     institution: str
@@ -45,7 +44,7 @@ class Skills(BaseModel):
     frameworks: List[str]
     databases: List[str]
     infrastructure: List[str]
-    security: List[str]
+    api_and_integration: List[str]
     ai_ml: List[str]
 
 class ExperienceEntry(BaseModel):
@@ -62,7 +61,7 @@ class ProjectEntry(BaseModel):
     location: str
     start_date: str
     end_date: str
-    link: Optional[str] = ""
+    link: Optional[str] = None
     bullets: List[str]
 
 class TailoredResume(BaseModel):
@@ -157,13 +156,11 @@ to align with the specified job posting while strictly adhering to visual page c
 1. **Bullet Points (Experience & Projects)**:
    - Reorder bullet points within each role/project to lead with the achievements most relevant to the job posting.
    - Rephrase the bullet text slightly to mirror terminology used in the job description where it is truthful.
-   - Emphasize **Orbit** for supply chain, logistics, microservices, and platform/infrastructure roles.
-   - Emphasize **MindHive** for AI, ML, vector search (pgvector), RAG, and data pipeline roles.
+   - Emphasize projects and experiences most relevant to the job description (e.g. emphasize backend projects for backend roles, AI/ML for AI roles, etc.).
 2. **Strict Layout Constraints (Must be followed exactly)**:
    - **Professional Summary**: Maximum of 2 sentences.
-   - **Vybd Experience Bullets**: Pick and tailor exactly 6 most relevant bullets (discard the rest).
-   - **Evision Experience Bullets**: Pick and tailor exactly 6 most relevant bullets (discard the rest).
-   - **MindHive Project Bullets**: Tailor exactly 3 bullets.
+   - **Experience Bullets**: Pick and tailor exactly 6 most relevant bullets for the most recent role, and 3-6 bullets for older roles (discard the rest).
+   - **Project Bullets**: Pick and tailor exactly 3 bullets per project.
    - **Total Bullets**: Under no circumstances should the total number of bullets in the entire resume exceed 15.
 3. **No Fabrication**:
    - Do NOT invent any skills, experience, projects, tools, metrics, or education. Keep all credentials truthful to the base resume.
@@ -209,7 +206,7 @@ to align with the specified job posting while strictly adhering to visual page c
         
         # Contact header
         c = r['contact']
-        md.append(f"\n{c['phone']} | {c['email']} | [LinkedIn]({c['linkedin']}) | [GitHub]({c['github']}) | [Portfolio]({c['portfolio']})")
+        md.append(f"\n{c['phone']} | {c['email']} | [LinkedIn]({c['linkedin']}) | [GitHub]({c['github']})")
         md.append("\n---")
         
         # Summary
@@ -219,40 +216,49 @@ to align with the specified job posting while strictly adhering to visual page c
         
         # Professional Experience
         md.append("\n## PROFESSIONAL EXPERIENCE")
-        for i, exp in enumerate(r['experience']):
+        for i, exp in enumerate(r.get('experience', [])):
             if i > 0:
                 md.append('\n<div class="item-gap"></div>')
-            md.append(f'\n<div class="item-header"><div class="item-title"><strong>{exp["role"]}</strong></div><div class="item-date"><strong>{exp["start_date"]} - {exp["end_date"]}</strong></div></div>\n<div class="item-subtitle"><strong>{exp["company"]}</strong></div>\n')
-            for bullet in exp['bullets']:
+            role = exp.get('role', exp.get('title', ''))
+            start = exp.get('start_date', exp.get('date', ''))
+            end = exp.get('end_date', '')
+            date_str = f"{start} - {end}" if end else start
+            md.append(f'\n<div class="item-header"><div class="item-title"><strong>{role}</strong></div><div class="item-date"><strong>{date_str}</strong></div></div>\n<div class="item-subtitle"><strong>{exp.get("company", "")}</strong></div>\n')
+            for bullet in exp.get('bullets', []):
                 md.append(f"- {bullet}")
                 
         md.append("\n---")
         
         # Education
         md.append("\n## EDUCATION")
-        for i, edu in enumerate(r['education']):
+        for i, edu in enumerate(r.get('education', [])):
             if i > 0:
                 md.append('\n<div class="item-gap"></div>')
             loc_str = f", {edu['location']}" if edu.get('location') else ""
             gpa_str = f"<br>GPA {edu['gpa']}" if edu.get('gpa') else ""
-            md.append(f'\n<div class="item-header"><div class="item-title"><strong>{edu["degree"]}</strong><br>{edu["institution"]}{loc_str}</div><div class="item-date" style="text-align: right;"><strong>{edu["graduation_date"]}</strong>{gpa_str}</div></div>\n')
+            degree = edu.get('degree', '')
+            inst = edu.get('institution', '')
+            grad = edu.get('graduation_date', edu.get('date', ''))
+            md.append(f'\n<div class="item-header"><div class="item-title"><strong>{degree}</strong><br>{inst}{loc_str}</div><div class="item-date" style="text-align: right;"><strong>{grad}</strong>{gpa_str}</div></div>\n')
             
         md.append("\n---")
         
         # Project Experience
         md.append("\n## PROJECT EXPERIENCE")
-        for i, proj in enumerate(r['projects']):
+        for i, proj in enumerate(r.get('projects', [])):
             if i > 0:
                 md.append('\n<div class="item-gap"></div>')
-            proj_title = proj['name']
-            role_title = proj.get('role', 'Open Source')
+            proj_title = proj.get('name', '')
             proj_link = proj.get('link', '')
-            if proj_link:
-                link_str = f' | <a href="{proj_link}">Link</a>'
+            
+            if proj_link and proj_link.lower() not in ('', 'none', 'link'):
+                title_html = f'<strong>{proj_title} | <a href="{proj_link}">Link</a></strong>'
             else:
-                link_str = ''
-            md.append(f'\n<div class="item-header"><div class="item-title"><strong>{proj_title} | {role_title}{link_str}</strong></div><div class="item-date"><strong>{proj["start_date"]}</strong></div></div>\n')
-            for bullet in proj['bullets']:
+                title_html = f'<strong>{proj_title}</strong>'
+                
+            start = proj.get('start_date', proj.get('date', ''))
+            md.append(f'\n<div class="item-header"><div class="item-title">{title_html}</div><div class="item-date"><strong>{start}</strong></div></div>\n')
+            for bullet in proj.get('bullets', []):
                 md.append(f"- {bullet}")
                 
         md.append("\n---")
@@ -264,7 +270,7 @@ to align with the specified job posting while strictly adhering to visual page c
         md.append(f"- **Frameworks:** {', '.join(skills['frameworks'])}")
         md.append(f"- **Databases:** {', '.join(skills['databases'])}")
         md.append(f"- **Cloud & Infra:** {', '.join(skills['infrastructure'])}")
-        md.append(f"- **APIs & Integration:** {', '.join(skills['security'])}")
+        md.append(f"- **APIs & Integration:** {', '.join(skills['api_and_integration'])}")
         md.append(f"- **AI/ML:** {', '.join(skills['ai_ml'])}")
         
         return "\n".join(md) + "\n"

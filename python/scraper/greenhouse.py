@@ -92,7 +92,7 @@ class GreenhouseScraper(BaseScraper):
             is_remote = True
 
         # Extract posted date (Greenhouse uses updated_at)
-        posted_at_val = datetime.utcnow()
+        posted_at_val = datetime.now()  # local time fallback
         updated_at_str = raw.get("updated_at")
         if updated_at_str:
             try:
@@ -109,6 +109,6 @@ class GreenhouseScraper(BaseScraper):
             remote=is_remote,
             url=url,
             raw_jd=clean_jd,
-            scraped_at=datetime.utcnow(),
+            scraped_at=datetime.now(),  # local machine time
             posted_at=posted_at_val
         )

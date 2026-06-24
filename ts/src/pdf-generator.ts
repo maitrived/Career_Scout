@@ -36,7 +36,7 @@ export async function generatePDF(htmlContent: string, outputPath: string) {
     const scaledBulletGap = ratio > 1 ? 0 : 2;
     const scaledMarginTop = ratio > 1 ? 2 : 5;
 
-    await page.evaluate(({ fs, lh, sg, bg, mt }) => {
+    await page.evaluate(({ fs, lh, sg, bg, mt }: { fs: number, lh: number, sg: number, bg: number, mt: number }) => {
       const root = document.documentElement;
       root.style.setProperty('--font-size', `${fs}pt`);
       root.style.setProperty('--line-height', `${lh}`);

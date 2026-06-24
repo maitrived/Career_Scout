@@ -651,3 +651,134 @@ async def validate_pipeline(job_id: str) -> Dict[str, Any]:
         metrics["error"] = str(ex)
         logger.error(f"Validation failed: {ex}")
         return metrics
+
+async def import_pipeline(file_path: Optional[str] = None, url: Optional[str] = None, skip_scoring: bool = False) -> Dict[str, Any]:
+    import pandas as pd
+    from python.scraper.generic import GenericScraper
+    from python.db.models import Score
+    
+    metrics = {
+        "imported": 0,
+        "scored": 0,
+        "tailored": 0,
+        "packaged": 0,
+        "errors": [],
+        "job_ids": []
+    }
+    logger.info(f"Starting Import Pipeline (file='{file_path}', url='{url}', skip_scoring={skip_scoring})...")
+    
+    try:
+        jobs_to_scrape = []
+        
+        if url:
+            jobs_to_scrape.append({"url": url, "company": "Unknown", "title": ""})
+        elif file_path:
+            if file_path.endswith('.csv'):
+                df = pd.read_csv(file_path)
+            elif file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+                df = pd.read_excel(file_path)
+            else:
+                raise ValueError("Unsupported file format. Please use .csv or .xlsx")
+                
+            # Convert columns to lowercase for easy matching
+            df.columns = [str(c).lower().strip() for c in df.columns]
+            
+            url_col = next((c for c in df.columns if c in ['url', 'link', 'job_url']), None)
+            if not url_col:
+                raise ValueError("Could not find a 'url' or 'link' column in the file.")
+                
+            company_col = next((c for c in df.columns if c in ['company', 'employer']), None)
+            title_col = next((c for c in df.columns if c in ['title', 'role', 'job_title']), None)
+            
+            for index, row in df.iterrows():
+                row_url = row[url_col]
+                if pd.isna(row_url) or not str(row_url).strip():
+                    continue
+                    
+                company = str(row[company_col]) if company_col and not pd.isna(row[company_col]) else "Unknown"
+                title = str(row[title_col]) if title_col and not pd.isna(row[title_col]) else ""
+                
+                jobs_to_scrape.append({"url": row_url, "company": company, "title": title})
+        else:
+            raise ValueError("Either file_path or url must be provided.")
+        
+        scraper = GenericScraper()
+        jobs_to_process = []
+        
+        for job_data in jobs_to_scrape:
+            job_url = job_data["url"]
+            job_company = job_data["company"]
+            job_title = job_data["title"]
+            
+            logger.info(f"Importing job from URL: {job_url}")
+            try:
+                scraped_jobs = await scraper.fetch_jobs(job_url)
+                if scraped_jobs:
+                    job = scraped_jobs[0]
+                    # Override with excel data if present
+                    if job_company != "Unknown": job.company = job_company
+                    if job_title: job.title = job_title
+                    
+                    from python.utils.job_filter import passes_job_filter
+                    if passes_job_filter(job):
+                        saved_job = save_job(job)
+                        if saved_job:
+                            jobs_to_process.append(saved_job)
+                            metrics["imported"] += 1
+            except Exception as ex:
+                logger.error(f"Error scraping imported job {job_url}: {ex}")
+                metrics["errors"].append(f"{job_url}: {ex}")
+                
+        # Now process each imported job
+        for job in jobs_to_process:
+            if skip_scoring:
+                # Insert dummy score to bypass
+                dummy_score = Score(
+                    job_id=job.id,
+                    embedding_similarity=1.0,
+                    overall_score=5.0,
+                    tech_fit=5.0,
+                    level_fit=5.0,
+                    growth_signal=5.0,
+                    culture_signal=5.0,
+                    sponsorship_signal=3.0,
+                    rationale="Auto-advanced via import (Scoring Skipped)",
+                    red_flags=["None"]
+                )
+                save_score(dummy_score)
+                metrics["scored"] += 1
+                logger.info(f"Skipped scoring for {job.id}. Assigned dummy score of 5.0.")
+            else:
+                # Normal scoring
+                await score_pipeline(job_id=str(job.id), dry_run=False)
+                metrics["scored"] += 1
+                
+            # Fetch the score to see if it advanced
+            from python.db.client import get_connection
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT overall_score FROM scores WHERE job_id = ?", (str(job.id),))
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row and row['overall_score'] >= 3.5:
+                # Tailor
+                tailor_res = await tailor_pipeline(job_id=str(job.id))
+                if tailor_res.get("success"):
+                    metrics["tailored"] += 1
+                    # Package
+                    pkg_res = await package_pipeline(job_id=str(job.id))
+                    if pkg_res.get("success"):
+                        metrics["packaged"] += 1
+                        
+            metrics["job_ids"].append(str(job.id))
+                        
+            # Sleep to avoid rate limits
+            await asyncio.sleep(2.0)
+            
+    except Exception as ex:
+        metrics["errors"].append(str(ex))
+        logger.error(f"Import pipeline failed: {ex}")
+        
+    logger.info(f"Import Pipeline Complete. Imported: {metrics['imported']}, Scored: {metrics['scored']}, Packaged: {metrics['packaged']}.")
+    return metrics

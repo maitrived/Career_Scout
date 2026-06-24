@@ -34,6 +34,8 @@ python -m playwright install
 Below are the primary CLI commands available via `scout.bat`. See `COMMANDS.md` for a fuller reference.
 
 - `scout.bat pipeline --company <slug>` — Run end-to-end pipeline for a company (Scrape → Score → Tailor → Package).
+- `scout.bat pipeline --file <path> [--skip-scoring]` — Import jobs from an Excel/CSV file and run the pipeline on them.
+- `scout.bat pipeline --url <url> [--skip-scoring]` — Import a single job from a URL and run the pipeline on it.
 - `scout.bat process --job <id>` — Run pipeline for a single job (Score → Tailor → Package).
 - `scout.bat scrape [--company <slug>] [--query "<text>"] [--source <source>] [--all]` — Scrape jobs globally, for a company, a query, a specific source (like `yc`), or all sources combined.
 - `scout.bat score [--job <id>] [--dry-run]` — Score jobs; `--dry-run` prints which jobs would be scored.

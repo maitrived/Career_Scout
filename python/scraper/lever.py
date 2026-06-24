@@ -117,7 +117,7 @@ class LeverScraper(BaseScraper):
             is_remote = True
 
         # Extract posted date (Lever uses createdAt millisecond timestamp)
-        posted_at_val = datetime.utcnow()
+        posted_at_val = datetime.now()  # local time fallback
         created_at_ms = raw.get("createdAt")
         if created_at_ms is not None:
             try:
@@ -134,6 +134,6 @@ class LeverScraper(BaseScraper):
             remote=is_remote,
             url=url,
             raw_jd=clean_jd,
-            scraped_at=datetime.utcnow(),
+            scraped_at=datetime.now(),  # local machine time
             posted_at=posted_at_val
         )

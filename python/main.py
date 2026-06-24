@@ -15,10 +15,12 @@ from python.orchestrator import (
     master_pipeline,
     process_single_job,
     validate_pipeline,
+    import_pipeline,
 )
 from python.db.client import (
     get_pipeline_status,
     get_ready_applications,
+    get_ready_applications_by_date,
     mark_applied,
     get_jobs_needing_tailor,
     get_jobs_needing_package,
@@ -260,15 +262,17 @@ def cmd_validate(args):
     """Validates the PDF generation layout scaling and A4 page fit.
 
     Modes:
-    - No args: lists all jobs that have a tailored resume and prints their job ID and page_fill.
+    - No args: auto-fixes all out-of-bounds resumes iteratively.
+    - 'list': lists all jobs that have a tailored resume out of bounds.
     - --job <ID> with no adjust flags: validates that single job and prints detailed metrics.
     - --job <ID> --increaseline X: iteratively re-renders the job increasing line-height by X until page_fill in [95,100] or attempts exhausted.
     - --job <ID> --decreaseline X: iteratively re-renders the job decreasing line-height by X until page_fill in [95,100] or attempts exhausted.
     """
 
-    job_id = args.job
+    job_id = getattr(args, "job", None)
     inc = getattr(args, "increaseline", None)
     dec = getattr(args, "decreaseline", None)
+    action = getattr(args, "action", "autofix")
 
     # Validate flag usage
     if inc is not None and dec is not None:
@@ -277,8 +281,8 @@ def cmd_validate(args):
         )
         return
 
-    # 1) No job: list all jobs with resumes out of bounds
-    if not job_id and inc is None and dec is None:
+    # 1) List action: list all jobs with resumes out of bounds
+    if action == "list" and not job_id and inc is None and dec is None:
         console.print(
             Panel("[bold blue]Resume Page-Fill Summary (Out of Bounds)[/bold blue]", expand=False)
         )
@@ -287,24 +291,150 @@ def cmd_validate(args):
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(
-            "SELECT j.id, rv.page_fill FROM jobs j JOIN applications a ON j.id = a.job_id JOIN resume_versions rv ON a.resume_version_id = rv.id WHERE rv.page_fill < 95 OR rv.page_fill > 100"
+            "SELECT j.id, rv.page_fill FROM jobs j JOIN applications a ON j.id = a.job_id JOIN resume_versions rv ON a.resume_version_id = rv.id WHERE rv.page_fill IS NOT NULL"
         )
-        rows = cur.fetchall()
+        all_rows = cur.fetchall()
         conn.close()
 
+        total_resumes = len(all_rows)
+        underfilled = []
+        overfilled = []
+        perfect = []
+        
+        for r in all_rows:
+            jid = r["id"]
+            pf = r["page_fill"]
+            if pf < 95:
+                underfilled.append((jid, pf))
+            elif pf > 100:
+                overfilled.append((jid, pf))
+            else:
+                perfect.append((jid, pf))
+                
+        console.print(f"Total Resumes: [bold]{total_resumes}[/bold]")
+        console.print(f"Perfect Fit (95-100%): [bold green]{len(perfect)}[/bold green]")
+        console.print(f"Underfilled (<95%): [bold yellow]{len(underfilled)}[/bold yellow]")
+        console.print(f"Overfilled (>100%): [bold red]{len(overfilled)}[/bold red]\n")
+
+        if not underfilled and not overfilled:
+            console.print("[green]All tailored resumes are perfectly fitted (95-100%) or no resumes found![/green]")
+            return
+
+        if overfilled:
+            console.print("[bold red]Overfilled Resumes:[/bold red]")
+            for jid, pf in overfilled:
+                console.print(f"  [red]{jid} — page_fill: {pf}%[/red]")
+                
+        if underfilled:
+            if overfilled:
+                console.print("") # Add a blank line if both exist
+            console.print("[bold yellow]Underfilled Resumes:[/bold yellow]")
+            for jid, pf in underfilled:
+                console.print(f"  [yellow]{jid} — page_fill: {pf}%[/yellow]")
+        return
+
+    # 1.5) Autofix loop
+    if action == "autofix" and inc is None and dec is None:
+        console.print(
+            Panel("[bold blue]Resume Auto-Resizing[/bold blue]", expand=False)
+        )
+        from python.db.client import get_connection
+        from pathlib import Path
+        import re
+        from python.utils.pdf_bridge import generate_pdf
+        
+        tpl_path = Path("templates/resume.html")
+        if not tpl_path.exists():
+            tpl_path = Path(__file__).resolve().parent.parent / "templates" / "resume.html"
+        txt = tpl_path.read_text(encoding="utf-8")
+        m = re.search(r"--line-height:\s*([0-9]*\.?[0-9]+);", txt)
+        if not m:
+            console.print("[yellow]Could not find --line-height in template; aborting auto-fix.[/yellow]")
+            return
+        base_line_height = float(m.group(1))
+
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        if job_id:
+            cur.execute(
+                "SELECT j.id, rv.page_fill, rv.resume_md FROM jobs j JOIN applications a ON j.id = a.job_id JOIN resume_versions rv ON a.resume_version_id = rv.id WHERE j.id = ?",
+                (str(job_id),)
+            )
+        else:
+            cur.execute(
+                "SELECT j.id, rv.page_fill, rv.resume_md FROM jobs j JOIN applications a ON j.id = a.job_id JOIN resume_versions rv ON a.resume_version_id = rv.id WHERE rv.page_fill < 95 OR rv.page_fill > 100"
+            )
+        rows = cur.fetchall()
+        
         if not rows:
             console.print("[green]All tailored resumes are perfectly fitted (95-100%) or no resumes found![/green]")
+            conn.close()
             return
 
         for r in rows:
             jid = r["id"]
             pf = r["page_fill"]
-            if pf is None:
+            resume_md = r["resume_md"]
+            if pf is None or not resume_md:
                 continue
-            if pf > 100:
-                console.print(f"[red]{jid} — page_fill: {pf}% (OVERFLOW)[/red]")
+            
+            console.print(f"\n[cyan]Auto-fixing job {jid} (Current page_fill: {pf}%)[/cyan]")
+            
+            current_lh = base_line_height
+            attempts = 0
+            max_attempts = 10
+            
+            # Initial baseline render to get true initial_fill
+            try:
+                out_path, current_pf, current_init = asyncio.run(
+                    generate_pdf(resume_md, jid, line_height_override=current_lh)
+                )
+            except Exception as e:
+                console.print(f"[red]Failed initial render for {jid}: {e}[/red]")
+                continue
+                
+            console.print(f"  Baseline: line-height={current_lh:.3f} -> init_fill={current_init}%, page_fill={current_pf}%")
+            
+            while attempts < max_attempts and not (95 <= current_init <= 100):
+                error = 97.5 - current_init
+                step = error * 0.005
+                step = max(min(step, 0.05), -0.05)
+                
+                if abs(step) < 0.01:
+                    step = 0.01 if error > 0 else -0.01
+
+                current_lh += step
+                current_lh = max(0.1, current_lh)
+                
+                try:
+                    out_path, new_pf, new_init = asyncio.run(
+                        generate_pdf(resume_md, jid, line_height_override=current_lh)
+                    )
+                    current_pf = new_pf
+                    current_init = new_init
+                except Exception as e:
+                    console.print(f"[red]Failed to generate PDF for {jid}: {e}[/red]")
+                    break
+                
+                attempts += 1
+                console.print(f"  Attempt {attempts}: line-height={current_lh:.3f} -> init_fill={current_init}%, page_fill={current_pf}%")
+            
+            stored_pf = current_pf if 95 <= current_pf <= 100 else current_init
+            cur2 = conn.cursor()
+            cur2.execute(
+                "UPDATE resume_versions SET page_fill = ? WHERE id = (SELECT resume_version_id FROM applications WHERE job_id = ?)",
+                (stored_pf, str(jid))
+            )
+            conn.commit()
+            
+            if 95 <= current_init <= 100:
+                console.print(f"[green]  Success for {jid}: stabilized at init_fill={current_init}%, page_fill={current_pf}%[/green]")
             else:
-                console.print(f"[yellow]{jid} — page_fill: {pf}% (UNDERFILL)[/yellow]")
+                console.print(f"[yellow]  Stopped auto-fix for {jid} at init_fill={current_init}%, page_fill={current_pf}% (attempts exhausted)[/yellow]")
+
+        conn.close()
+        console.print("\n[bold green]Auto-Resizing Complete![/bold green]")
         return
 
     # 2) Single-job adjustments
@@ -527,7 +657,41 @@ def cmd_scrape(args):
 
 
 def cmd_pipeline(args):
-    """Executes the full end-to-end pipeline."""
+    """Executes the full end-to-end pipeline or import pipeline."""
+    file_path = getattr(args, "file", None)
+    url = getattr(args, "url", None)
+    skip_scoring = getattr(args, "skip_scoring", False)
+    
+    if file_path or url:
+        console.print(
+            Panel(
+                f"[bold blue]Scout Import Pipeline[/bold blue]\n"
+                f"File: [cyan]{file_path or 'N/A'}[/cyan]\n"
+                f"URL: [cyan]{url or 'N/A'}[/cyan]\n"
+                f"Skip Scoring: [cyan]{skip_scoring}[/cyan]",
+                title="[bold]Import Pipeline[/bold]",
+                expand=False,
+            )
+        )
+        with console.status(f"[bold green]Running import pipeline...") as status:
+            metrics = asyncio.run(import_pipeline(file_path=file_path, url=url, skip_scoring=skip_scoring))
+            
+        console.print(f"\n[bold green][PASS] Import Pipeline Complete![/bold green]")
+        console.print(f"Jobs Imported: [bold]{metrics.get('imported', 0)}[/bold]")
+        if metrics.get('job_ids'):
+            console.print(f"Job IDs: [bold cyan]{', '.join(metrics['job_ids'])}[/bold cyan]")
+        console.print(f"Jobs Scored/Advanced: [bold]{metrics.get('scored', 0)}[/bold]")
+        console.print(f"Packages Generated: [bold cyan]{metrics.get('packaged', 0)}[/bold cyan]")
+        
+        if metrics.get("errors"):
+            console.print(f"\n[bold red]Encountered {len(metrics['errors'])} errors:[/bold red]")
+            for err in metrics["errors"][:5]:
+                console.print(f"  - [red]{err}[/red]")
+            
+        if metrics.get("packaged", 0) > 0:
+            console.print("\n[bold]Run '.\\scout.bat review' to see your new application packages![/bold]")
+        return
+
     company = getattr(args, "company", None)
 
     console.print(
@@ -656,6 +820,7 @@ def cmd_status(args):
 def cmd_apply(args):
     """Executes the Playwright autofiller."""
     job_id = args.job
+    scraped_on = getattr(args, "scraped_on", None)
 
     if job_id:
         job_ids = [job_id]
@@ -663,6 +828,33 @@ def cmd_apply(args):
             Panel(
                 f"[bold blue]Scout Auto-Filler: Single Job[/bold blue]\n"
                 f"Job ID: [cyan]{job_id}[/cyan]",
+                title="[bold]Auto-Filler[/bold]",
+                expand=False,
+            )
+        )
+    elif scraped_on:
+        # Filter ready applications by the date the job was scraped
+        try:
+            apps = get_ready_applications_by_date(scraped_on)
+        except ValueError as ve:
+            console.print(f"[bold red]Error:[/bold red] {ve}")
+            return
+        if not apps:
+            label = "today" if scraped_on.lower() == "today" else scraped_on
+            console.print(
+                Panel(
+                    f"[bold yellow]No ready applications found for jobs scraped on {label}.[/bold yellow]\n"
+                    "Run the pipeline on that date's scraped jobs first!"
+                )
+            )
+            return
+        job_ids = [app["job_id"] for app in apps]
+        label = "today" if scraped_on.lower() == "today" else scraped_on
+        console.print(
+            Panel(
+                f"[bold blue]Scout Auto-Filler: Date-Filtered[/bold blue]\n"
+                f"Scraped on: [cyan]{label}[/cyan]\n"
+                f"Ready Applications to Fill: [cyan]{len(job_ids)}[/cyan]",
                 title="[bold]Auto-Filler[/bold]",
                 expand=False,
             )
@@ -892,13 +1084,30 @@ def main():
     # 6. Pipeline subcommand
     parser_pipeline = subparsers.add_parser(
         "pipeline",
-        help="Run the full end-to-end pipeline (scrape -> score -> tailor -> package)",
+        help="Run the full end-to-end pipeline or import jobs from file",
     )
     parser_pipeline.add_argument(
         "--company",
         type=str,
         default=None,
         help="Specific company slug to run the pipeline for",
+    )
+    parser_pipeline.add_argument(
+        "--file",
+        type=str,
+        default=None,
+        help="Path to Excel or CSV file containing job URLs to import",
+    )
+    parser_pipeline.add_argument(
+        "--url",
+        type=str,
+        default=None,
+        help="A single job URL to import directly",
+    )
+    parser_pipeline.add_argument(
+        "--skip-scoring",
+        action="store_true",
+        help="Skip LLM scoring for imported jobs (assigns 5.0 automatically)",
     )
 
     # 7. Process subcommand
@@ -937,6 +1146,14 @@ def main():
         default=None,
         help="Specific job ID to autofill (otherwise fills all 'ready' jobs)",
     )
+    parser_apply.add_argument(
+        "--scraped-on",
+        type=str,
+        default=None,
+        dest="scraped_on",
+        metavar="DATE",
+        help="Only apply to jobs scraped on this date. Use 'today' or MM-DD-YYYY format (e.g. '06-18-2026').",
+    )
 
     # 11. QA subcommand
     parser_qa = subparsers.add_parser(
@@ -955,6 +1172,9 @@ def main():
     # 12. Validate subcommand
     parser_validate = subparsers.add_parser(
         "validate", help="Validate PDF layout and A4 page fill percentage"
+    )
+    parser_validate.add_argument(
+        "action", nargs="?", default="autofix", choices=["list", "autofix"], help="Action: 'list' (list out of bound resumes) or 'autofix' (default auto-resizer)"
     )
     parser_validate.add_argument(
         "--job", type=str, default=None, help="Specific job ID to validate layout for"

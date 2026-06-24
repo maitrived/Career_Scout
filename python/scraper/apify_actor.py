@@ -82,7 +82,7 @@ class ApifyScraper(BaseScraper):
             remote=True, # YC jobs we scrape are set to remote via config
             url=url,
             raw_jd=raw_jd,
-            scraped_at=datetime.utcnow()
+            scraped_at=datetime.now()  # local machine time
         )
 
     def normalize_wellfound(self, raw: Dict[str, Any]) -> Job:
@@ -113,7 +113,7 @@ class ApifyScraper(BaseScraper):
             remote=is_remote,
             url=url,
             raw_jd=clean_jd,
-            scraped_at=datetime.utcnow()
+            scraped_at=datetime.now()  # local machine time
         )
 
     def normalize(self, raw: Dict[str, Any], company: str) -> Job:
@@ -140,7 +140,7 @@ class ApifyScraper(BaseScraper):
 
         url = raw.get("link", raw.get("url", ""))
 
-        posted_at_val = datetime.utcnow()
+        posted_at_val = datetime.now()  # local time fallback
         posted_at_str = raw.get("postedAt", raw.get("postDate", raw.get("date", raw.get("timePosted"))))
         if posted_at_str:
             try:
@@ -160,7 +160,7 @@ class ApifyScraper(BaseScraper):
             remote=is_remote,
             url=url,
             raw_jd=clean_jd,
-            scraped_at=datetime.utcnow(),
+            scraped_at=datetime.now(),  # local machine time
             posted_at=posted_at_val
         )
 
